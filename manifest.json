@@ -1,0 +1,14 @@
+{
+  "name": "Logic Puzzles",
+  "short_name": "Puzzles",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#eef0fb",
+  "theme_color": "#283593",
+  "description": "Lights Out, Sliding Tiles and Minesweeper, with a daily puzzle set. Works offline.",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-96.png", "sizes": "96x96", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "logic-puzzles",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Logic puzzle progressive web app: Lights Out, Sliding Tiles and Minesweeper",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/serve.mjs . 8080",
+    "build": "node scripts/build.mjs",
+    "preview": "npm run build && node scripts/serve.mjs dist 8080",
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "npm run build && playwright test",
+    "test": "npm run test:unit && npm run test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "esbuild": "^0.25.10"
+  }
+}

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Logic Puzzles</title>
+  <meta name="description" content="Lights Out, Sliding Tiles and Minesweeper, with a daily puzzle set. Works offline.">
+  <meta name="theme-color" content="#283593">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Logic Puzzles">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <script>
+    // Theme before the page draws, so dark mode doesn't flash white.
+    (function () {
+      var pref = "auto";
+      try { pref = JSON.parse(localStorage.getItem("logicPuzzles_theme")) || "auto"; } catch (e) {}
+      var dark = pref === "dark" || (pref === "auto" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    })();
+  </script>
+  <link rel="stylesheet" href="vendor/fonts/fredoka.css">
+  <link rel="stylesheet" href="src/styles.css">
+  <script src="vendor/confetti.browser.js" defer></script>
+  <script type="module" src="src/main.js"></script>
+</head>
+<body>
+  <!-- ==================== Home ==================== -->
+  <main id="home" class="screen">
+    <header class="home-header">
+      <h1><span class="logo" aria-hidden="true">🧩</span> Logic Puzzles</h1>
+      <button type="button" id="settings-btn" class="icon-button" aria-label="Settings">⚙️</button>
+    </header>
+
+    <button type="button" id="continue-btn" class="continue-card" hidden></button>
+
+    <section class="daily-card" aria-labelledby="daily-title">
+      <div class="daily-head">
+        <h2 id="daily-title">Today's puzzles</h2>
+        <span id="daily-date" class="daily-date"></span>
+      </div>
+      <p id="daily-status" class="daily-status"></p>
+      <div id="daily-list" class="daily-list"></div>
+      <div class="daily-foot">
+        <span id="daily-streak" class="daily-streak"></span>
+        <button type="button" id="daily-share-btn" class="link-button" hidden>Share</button>
+      </div>
+    </section>
+
+    <h2 class="section-title">Play any time</h2>
+    <div id="puzzle-list" class="puzzle-list"></div>
+    <p class="home-foot"><button type="button" id="help-btn" class="link-button">How to play</button></p>
+  </main>
+
+  <!-- ==================== Game ==================== -->
+  <main id="game" class="screen" hidden>
+    <header class="game-header">
+      <button type="button" id="game-back-btn" class="icon-button" aria-label="Back to Home">←</button>
+      <div class="game-title">
+        <h2 id="game-name"></h2>
+        <span id="game-level" class="game-level"></span>
+      </div>
+      <button type="button" id="game-help-btn" class="icon-button" aria-label="How to play">?</button>
+    </header>
+    <div class="game-status" aria-live="off">
+      <span class="status-item">⏱ <span id="game-time">0:00</span></span>
+      <span class="status-item" id="game-moves-item"><span id="game-moves-label">Moves</span> <span id="game-moves">0</span></span>
+      <span class="status-item" id="game-par-item" hidden>Fewest <span id="game-par"></span></span>
+    </div>
+    <div id="board-area" class="board-area">
+      <div id="board" class="board" role="grid"></div>
+    </div>
+    <div class="game-controls">
+      <button type="button" id="flag-btn" class="control" aria-pressed="false" hidden>⛏️ Dig</button>
+      <button type="button" id="hint-btn" class="control">💡 Hint</button>
+      <button type="button" id="restart-btn" class="control">↺ Restart</button>
+      <button type="button" id="new-btn" class="control">✨ New</button>
+    </div>
+  </main>
+
+  <!-- ==================== How to play ==================== -->
+  <div id="help-overlay" class="overlay" hidden>
+    <div class="overlay-backdrop" data-close></div>
+    <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <button type="button" class="overlay-close" data-close aria-label="Close">✕</button>
+      <h2 id="help-title">How to play</h2>
+      <div id="help-body" class="help-body"></div>
+    </div>
+  </div>
+
+  <!-- ==================== Settings ==================== -->
+  <div id="settings-overlay" class="overlay" hidden>
+    <div class="overlay-backdrop" data-close></div>
+    <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <button type="button" class="overlay-close" data-close aria-label="Close">✕</button>
+      <h2 id="settings-title">Settings</h2>
+      <p class="setting-label" id="theme-label">Appearance</p>
+      <div class="segmented" role="group" aria-labelledby="theme-label">
+        <button type="button" class="theme-btn" data-theme-value="auto">Auto</button>
+        <button type="button" class="theme-btn" data-theme-value="light">Light</button>
+        <button type="button" class="theme-btn" data-theme-value="dark">Dark</button>
+      </div>
+      <p class="settings-note">Your best times and daily streak are saved on this device.</p>
+    </div>
+  </div>
+
+  <!-- ==================== Result (won or hit a mine) ==================== -->
+  <div id="result-overlay" class="overlay" hidden>
+    <div class="overlay-backdrop"></div>
+    <div class="overlay-card result-card" role="dialog" aria-modal="true" aria-labelledby="result-title">
+      <div id="result-emoji" class="result-emoji" aria-hidden="true"></div>
+      <h2 id="result-title"></h2>
+      <p id="result-text" class="result-text"></p>
+      <div id="result-stats" class="result-stats"></div>
+      <div class="result-actions">
+        <button type="button" id="result-primary" class="primary"></button>
+        <button type="button" id="result-secondary" class="secondary"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Confirmation ==================== -->
+  <div id="confirm-overlay" class="overlay" hidden>
+    <div class="overlay-backdrop" data-close></div>
+    <div class="overlay-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-text"></p>
+      <div class="result-actions">
+        <button type="button" id="confirm-cancel" class="primary" data-close>Keep playing</button>
+        <button type="button" id="confirm-ok" class="danger"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
