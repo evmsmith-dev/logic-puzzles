@@ -6,6 +6,7 @@ import { dateKey, newSeed } from "./lib/random.js";
 import { KEYS, readJson, writeJson } from "./storage.js";
 import { fitBoard, renderBoard } from "./ui/board.js";
 import { backToHome, closeTop, enterGame, initOverlays, isOpen, openOverlay } from "./ui/overlays.js";
+import { initInstall } from "./ui/install.js";
 import { registerServiceWorker } from "./ui/update.js";
 
 const byId = (id) => document.getElementById(id);
@@ -571,6 +572,7 @@ function init() {
     writeJson(KEYS.helpSeen, true);
     showHelp();
   }
+  initInstall();
   registerServiceWorker();
 }
 

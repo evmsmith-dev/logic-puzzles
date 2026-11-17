@@ -19,7 +19,8 @@ There's also a **daily set**: one of each puzzle at Medium, the same for everyon
   - **Minesweeper** boards are redrawn until a solver using safe deductions alone (single-number rules, comparing overlapping numbers, and the mine count) can finish them.
   - **Queens** boards grow one region around each queen of a planned answer, then move squares between regions until no other answer exists. A step-by-step solver that reasons like a player then checks the board can be finished by logic, and that Medium and Hard need the harder kinds of reasoning (regions boxed into the same rows or columns, and one-step "what if" checks). Hints come from the same solver.
 - **`src/main.js`** runs the screens, the clock, saving, the result pop-ups and the phone's Back gesture.
-- **`npm run build`** bundles everything into `dist/` with esbuild and writes a service worker that caches every file for offline play. A new version installs in the background and is offered with an Update button, so a puzzle in progress is never interrupted.
+- **`npm run build`** bundles everything into `dist/` with esbuild and writes a service worker that caches every file for offline play. A new version installs in the background and is offered with an Update button, so a puzzle in progress is never interrupted. The app also looks for a new version whenever it comes back on screen and every hour while open, since phones often resume an installed app instead of reopening it.
+- **Installing:** Home shows an Install card when the browser can install the app (Android, desktop Chrome and Edge). On iPhone and iPad it shows the Add to Home Screen steps instead. It hides once installed or after "Not now", and Settings keeps an Install button.
 
 ## Development
 
