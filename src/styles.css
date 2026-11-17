@@ -25,6 +25,9 @@
   --shadow: 0 6px 18px rgba(31, 35, 80, 0.12);
   --n1: #1e63d6; --n2: #2e7d32; --n3: #c62828; --n4: #4527a0;
   --n5: #8d3a00; --n6: #00838f; --n7: #37474f; --n8: #757575;
+  --q0: #f6a9a9; --q1: #fbc98a; --q2: #f7e48a; --q3: #b2df9d;
+  --q4: #9fd3ef; --q5: #c3b2ef; --q6: #f2b0dc; --q7: #96dccb;
+  --q-line: #2b2f5a; --q-thin: rgba(31, 35, 80, 0.18);
   color-scheme: light;
 }
 :root[data-theme="dark"] {
@@ -53,6 +56,9 @@
   --shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   --n1: #82b1ff; --n2: #81c784; --n3: #ff8a80; --n4: #b39ddb;
   --n5: #ffb74d; --n6: #4dd0e1; --n7: #cfd8dc; --n8: #9e9e9e;
+  --q0: #9a4f55; --q1: #9c6a35; --q2: #8f8338; --q3: #4f8045;
+  --q4: #3b7598; --q5: #6c5aa3; --q6: #985284; --q7: #2f8574;
+  --q-line: #05060f; --q-thin: rgba(0, 0, 0, 0.35);
   color-scheme: dark;
 }
 
@@ -120,7 +126,8 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .daily-head h2 { margin: 0; font-size: 1.35rem; }
 .daily-date { font-weight: 500; opacity: 0.9; }
 .daily-status { margin: 4px 0 12px; opacity: 0.92; line-height: 1.35; }
-.daily-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.daily-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+@media (min-width: 520px) { .daily-list { grid-template-columns: repeat(4, 1fr); } }
 .daily-item {
   border: 0; border-radius: 14px; padding: 10px 4px;
   background: rgba(255, 255, 255, 0.16); color: #fff;
@@ -206,6 +213,23 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .mine.is-flag { background: var(--hidden-hi); }
 .mine.n1 { color: var(--n1); } .mine.n2 { color: var(--n2); } .mine.n3 { color: var(--n3); } .mine.n4 { color: var(--n4); }
 .mine.n5 { color: var(--n5); } .mine.n6 { color: var(--n6); } .mine.n7 { color: var(--n7); } .mine.n8 { color: var(--n8); }
+
+/* Queens: colored regions with thick lines where a region ends. */
+.board-queens { border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); }
+.queen {
+  border-radius: 0; border: 1px solid var(--q-thin);
+  font-size: calc(var(--cell) * 0.55); line-height: 1; color: var(--q-line);
+}
+.queen.et { border-top: 3px solid var(--q-line); }
+.queen.er { border-right: 3px solid var(--q-line); }
+.queen.eb { border-bottom: 3px solid var(--q-line); }
+.queen.el { border-left: 3px solid var(--q-line); }
+.q0 { background: var(--q0); } .q1 { background: var(--q1); } .q2 { background: var(--q2); } .q3 { background: var(--q3); }
+.q4 { background: var(--q4); } .q5 { background: var(--q5); } .q6 { background: var(--q6); } .q7 { background: var(--q7); }
+.queen.is-cross { font-size: calc(var(--cell) * 0.4); opacity: 0.75; }
+:root[data-theme="dark"] .queen.is-cross { color: var(--text); }
+.queen.is-clash { background-image: repeating-linear-gradient(45deg, var(--danger) 0 6px, transparent 6px 12px); }
+.queen:active { filter: brightness(0.92); }
 
 /* A hint glows until the next move. */
 .cell.is-hint { outline: 4px solid var(--accent); outline-offset: -4px; animation: hint-pulse 1s ease-in-out infinite; }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LIGHTS_OUT_LEVELS, createLightsOut, isSolved as lightsOff, press, solve } from "../../src/puzzles/lights-out.js";
 import { MINESWEEPER_LEVELS, countMines, createMinesweeper, isCleared, open, solvableWithoutGuessing } from "../../src/puzzles/minesweeper.js";
+import { CROSS, QUEEN, QUEENS_LEVELS, clashingQueens, countSolutions, createQueens, isSolved as queensPlaced, nextMark, solveByLogic, touching } from "../../src/puzzles/queens.js";
 import { createSlidingTiles, isSolvable, isSolved as tilesInOrder, slide, solveSmall, solvedBoard } from "../../src/puzzles/sliding-tiles.js";
 import { PUZZLES } from "../../src/puzzles/index.js";
 
@@ -126,6 +127,109 @@ test("Minesweeper: a 50/50 is recognized as needing a guess", () => {
   assert.equal(solvableWithoutGuessing({ cols: 2, rows: 2, mines, counts, revealed }), false);
 });
 
+// ---------- Queens ----------
+
+/** True if every region's squares join up side to side. */
+function regionsJoinUp(regions, size) {
+  for (let region = 0; region < size; region++) {
+    const cells = regions.map((r, i) => (r === region ? i : -1)).filter((i) => i !== -1);
+    const seen = new Set([cells[0]]);
+    const queue = [cells[0]];
+    while (queue.length) {
+      const i = queue.pop();
+      for (const n of [i - size, i + size, i % size ? i - 1 : -1, (i + 1) % size ? i + 1 : -1]) {
+        if (n >= 0 && n < regions.length && regions[n] === region && !seen.has(n)) {
+          seen.add(n);
+          queue.push(n);
+        }
+      }
+    }
+    if (seen.size !== cells.length) return false;
+  }
+  return true;
+}
+
+for (const level of LEVELS) {
+  test(`Queens ${level}: one answer, joined-up regions, and solvable by logic at the right difficulty`, () => {
+    const { size, rules, needs } = QUEENS_LEVELS[level];
+    for (let i = 0; i < 40; i++) {
+      const { size: got, regions, answer } = createQueens(level, `seed-${i}`);
+      assert.equal(got, size);
+      assert.equal(regions.length, size * size);
+      assert.equal(new Set(regions).size, size, "one region per queen");
+      assert.ok(regionsJoinUp(regions, size), "regions join up");
+      assert.equal(countSolutions(regions, size, 3), 1, "exactly one answer");
+      const marks = new Array(size * size).fill(0);
+      for (const cell of answer) marks[cell] = QUEEN;
+      assert.ok(queensPlaced(regions, size, marks), "the answer follows the rules");
+      const { solved, hardest, order } = solveByLogic(regions, size, rules);
+      assert.ok(solved, "logic alone finishes it");
+      assert.ok(hardest >= needs, `needs level-${needs} reasoning`);
+      assert.deepEqual([...order].sort((a, b) => a - b), [...answer].sort((a, b) => a - b));
+    }
+  });
+}
+
+test("Queens: the same seed always makes the same puzzle", () => {
+  assert.deepEqual(createQueens("medium", "2026-11-03"), createQueens("medium", "2026-11-03"));
+  assert.notDeepEqual(createQueens("medium", "2026-11-03").regions, createQueens("medium", "2026-11-04").regions);
+});
+
+test("Queens: queens clash in a row, column, region, or touching at a corner", () => {
+  // 4×4: regions are the four 2×2 quarters.
+  const regions = [0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3];
+  const withQueens = (...cells) => {
+    const marks = new Array(16).fill(0);
+    for (const cell of cells) marks[cell] = QUEEN;
+    return marks;
+  };
+  assert.deepEqual([...clashingQueens(regions, 4, withQueens(0, 3))].sort(), [0, 3]); // same row
+  assert.deepEqual([...clashingQueens(regions, 4, withQueens(0, 12))].sort((a, b) => a - b), [0, 12]); // same column
+  assert.deepEqual([...clashingQueens(regions, 4, withQueens(0, 5))].sort((a, b) => a - b), [0, 5]); // same region, touching
+  assert.deepEqual([...clashingQueens(regions, 4, withQueens(5, 10))].sort((a, b) => a - b), [5, 10]); // corners touch
+  assert.equal(clashingQueens(regions, 4, withQueens(1, 11)).size, 0);
+  assert.deepEqual(touching(4, 0).sort((a, b) => a - b), [1, 4, 5]);
+});
+
+test("Queens: a tap cycles empty → ✕ → queen → empty, and the board is won only with every queen right", () => {
+  assert.equal(nextMark(0), CROSS);
+  assert.equal(nextMark(CROSS), QUEEN);
+  assert.equal(nextMark(QUEEN), 0);
+  const queens = PUZZLES.find((puzzle) => puzzle.id === "queens");
+  let state = queens.create("easy", "win-check");
+  for (const cell of state.answer.slice(0, -1)) state = queens.tap(queens.tap(state, cell).state, cell).state;
+  assert.ok(!queens.isWon(state));
+  const last = state.answer.at(-1);
+  state = queens.tap(queens.tap(state, last).state, last).state;
+  assert.ok(queens.isWon(state));
+  assert.equal(queens.counter(state)[1], `${state.size}/${state.size}`);
+});
+
+test("Queens: hints point out a wrong queen, then a ✕ over a queen, then the next queen to find", () => {
+  const queens = PUZZLES.find((puzzle) => puzzle.id === "queens");
+  const start = queens.create("medium", "hint-order");
+  const { answer, size } = start;
+  const wrong = [...Array(size * size).keys()].find((i) => !answer.includes(i));
+  const marks = start.marks.slice();
+  marks[wrong] = QUEEN;
+  marks[answer[2]] = CROSS;
+  assert.equal(queens.hint({ ...start, marks }), wrong);
+  assert.match(queens.hintText({ ...start, marks }, wrong), /doesn't belong/);
+  marks[wrong] = 0;
+  assert.equal(queens.hint({ ...start, marks }), answer[2]);
+  assert.match(queens.hintText({ ...start, marks }, answer[2]), /under that ✕/);
+  // On a fresh board, following the hints solves the puzzle.
+  let state = start;
+  for (let step = 0; step < size && !queens.isWon(state); step++) {
+    const cell = queens.hint(state);
+    assert.ok(answer.includes(cell));
+    const next = state.marks.slice();
+    next[cell] = QUEEN;
+    state = { ...state, marks: next };
+  }
+  assert.ok(queens.isWon(state));
+});
+
 // ---------- Moves through the shared puzzle interface ----------
 
 test("every puzzle: restart returns to the starting board, and a tap never changes the start", () => {
@@ -136,7 +240,7 @@ test("every puzzle: restart returns to the starting board, and a tap never chang
     for (let i = 0; i < 5; i++) current = puzzle.tap(current, i * 3, {}).state;
     assert.equal(JSON.stringify(current.start), startCopy, puzzle.id);
     const restarted = puzzle.restart(current);
-    assert.equal(JSON.stringify(restarted.board ?? restarted.revealed), startCopy, puzzle.id);
+    assert.equal(JSON.stringify(restarted.board ?? restarted.revealed ?? restarted.marks), startCopy, puzzle.id);
   }
 });
 

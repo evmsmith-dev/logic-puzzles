@@ -29,7 +29,14 @@ export function recordDaily(daily, day, puzzleId, result) {
   return next;
 }
 
-export const dayComplete = (daily, day, puzzleIds) => puzzleIds.every((id) => daily[day]?.[id]);
+/**
+ * True when every daily puzzle of `day` is done. `puzzleIds` is a list, or a function that gives
+ * the list for a day (a puzzle added to the app later isn't needed on days before it arrived).
+ */
+export function dayComplete(daily, day, puzzleIds) {
+  const ids = typeof puzzleIds === "function" ? puzzleIds(day) : puzzleIds;
+  return ids.every((id) => daily[day]?.[id]);
+}
 
 /**
  * Days in a row with every daily puzzle done. Today counts once it's complete; until then the

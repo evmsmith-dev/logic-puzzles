@@ -9,17 +9,42 @@ import { backToHome, closeTop, enterGame, initOverlays, isOpen, openOverlay } fr
 import { registerServiceWorker } from "./ui/update.js";
 
 const byId = (id) => document.getElementById(id);
-const PUZZLE_IDS = PUZZLES.map((puzzle) => puzzle.id);
+const NUMBER_WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+const inWords = (n) => NUMBER_WORDS[n] ?? String(n);
 const LONG_PRESS_MS = 450;
 
 const app = {
   stats: readJson(KEYS.stats, {}),
   daily: readJson(KEYS.daily, {}),
   levels: readJson("levels", {}), // last level chosen per puzzle
+  firstSeen: readJson("firstSeen", {}), // the day a puzzle added in an update first appeared here
   game: null, // { puzzleId, level, seed, daily, state, moves, elapsed, hinted, finished }
   flagMode: false,
   hint: null,
 };
+
+// ---------- Daily set ----------
+
+/**
+ * Notes the day each newly added puzzle first appears on this device, so a streak built before
+ * it arrived isn't broken by a puzzle the player couldn't have played.
+ */
+function noteNewPuzzles() {
+  const today = dateKey();
+  let changed = false;
+  for (const puzzle of PUZZLES) {
+    if (puzzle.addedLater && !app.firstSeen[puzzle.id]) {
+      app.firstSeen = { ...app.firstSeen, [puzzle.id]: today };
+      changed = true;
+    }
+  }
+  if (changed) writeJson("firstSeen", app.firstSeen);
+}
+
+/** The puzzles in the daily set on `day`. */
+const dailyIds = (day) => PUZZLES
+  .filter((puzzle) => !puzzle.addedLater || (app.firstSeen[puzzle.id] && app.firstSeen[puzzle.id] <= day))
+  .map((puzzle) => puzzle.id);
 
 // ---------- Home ----------
 
@@ -31,11 +56,11 @@ const shortDate = (key) => {
 function renderHome() {
   const today = dateKey();
   const done = app.daily[today] || {};
-  const finished = PUZZLE_IDS.filter((id) => done[id]).length;
+  const finished = PUZZLES.filter((puzzle) => done[puzzle.id]).length;
   byId("daily-date").textContent = shortDate(today);
   byId("daily-status").textContent = finished === PUZZLES.length
     ? "All done for today — come back tomorrow for new ones!"
-    : `The same three ${LEVEL_NAMES[DAILY_LEVEL]} puzzles for everyone today. ${finished} of ${PUZZLES.length} done.`;
+    : `The same ${inWords(PUZZLES.length)} ${LEVEL_NAMES[DAILY_LEVEL]} puzzles for everyone today. ${finished} of ${PUZZLES.length} done.`;
   byId("daily-list").innerHTML = PUZZLES.map((puzzle) => {
     const result = done[puzzle.id];
     return `<button type="button" class="daily-item${result ? " is-done" : ""}" data-daily="${puzzle.id}">
@@ -44,9 +69,9 @@ function renderHome() {
       <span class="daily-result">${result ? `✓ ${formatTime(result.time)}` : "Play"}</span>
     </button>`;
   }).join("");
-  const streak = dailyStreak(app.daily, today, PUZZLE_IDS);
-  byId("daily-streak").textContent = streak ? `🔥 ${streak}-day streak` : "Finish all three to start a streak";
-  byId("daily-share-btn").hidden = !dayComplete(app.daily, today, PUZZLE_IDS);
+  const streak = dailyStreak(app.daily, today, dailyIds);
+  byId("daily-streak").textContent = streak ? `🔥 ${streak}-day streak` : `Finish all ${inWords(PUZZLES.length)} to start a streak`;
+  byId("daily-share-btn").hidden = !dayComplete(app.daily, today, dailyIds);
 
   byId("puzzle-list").innerHTML = PUZZLES.map((puzzle) => {
     const level = app.levels[puzzle.id] || "easy";
@@ -119,13 +144,9 @@ function updateStatus() {
   if (!game) return;
   byId("game-time").textContent = formatTime(elapsed());
   const puzzle = puzzleById(game.puzzleId);
-  if (game.puzzleId === "minesweeper") {
-    byId("game-moves-label").textContent = "Mines left";
-    byId("game-moves").textContent = puzzle.minesLeft(game.state);
-  } else {
-    byId("game-moves-label").textContent = "Moves";
-    byId("game-moves").textContent = game.moves;
-  }
+  const [label, value] = puzzle.counter?.(game.state) ?? ["Moves", game.moves];
+  byId("game-moves-label").textContent = label;
+  byId("game-moves").textContent = value;
   const par = game.state.par;
   byId("game-par-item").hidden = !par;
   if (par) byId("game-par").textContent = par;
@@ -235,7 +256,7 @@ function showHint() {
   app.hint = index;
   drawBoard();
   saveGame();
-  toast(game.puzzleId === "minesweeper" ? "That square is safe to dig." : "Try tapping the glowing square.");
+  toast(puzzleById(game.puzzleId).hintText?.(game.state, index) ?? "Try tapping the glowing square.");
 }
 
 function finishGame(won) {
@@ -280,7 +301,7 @@ function finishGame(won) {
   if (game.daily) {
     text = remaining.length
       ? `${bestNote ? `${bestNote} ` : ""}${remaining.length} more daily puzzle${remaining.length > 1 ? "s" : ""} to go.`
-      : `That's all three for today! 🔥 ${dailyStreak(app.daily, today, PUZZLE_IDS)}-day streak.`;
+      : `That's all ${inWords(PUZZLES.length)} for today! 🔥 ${dailyStreak(app.daily, today, dailyIds)}-day streak.`;
   }
   showResult({
     emoji: "🎉",
@@ -368,7 +389,7 @@ function showHelp(puzzleId = null) {
       <h3>📅 Daily puzzles</h3>
       <ul>
         <li>Every day there's one of each puzzle at ${LEVEL_NAMES[DAILY_LEVEL]} level — the same for everyone.</li>
-        <li>Finish all three to keep your streak going. New puzzles arrive at midnight.</li>
+        <li>Finish all ${inWords(PUZZLES.length)} to keep your streak going. New puzzles arrive at midnight.</li>
         <li>💡 Hints are there if you're stuck, but a puzzle solved with a hint doesn't set a best time.</li>
       </ul>
     </section>`);
@@ -416,7 +437,7 @@ async function shareDaily() {
     const result = app.daily[today]?.[puzzle.id];
     return `${puzzle.emoji} ${result ? formatTime(result.time) : "—"}${result?.hinted ? " (hint)" : ""}`;
   });
-  const streak = dailyStreak(app.daily, today, PUZZLE_IDS);
+  const streak = dailyStreak(app.daily, today, dailyIds);
   const text = [`Logic Puzzles daily 🧩 ${shortDate(today)}`, ...lines, streak > 1 ? `🔥 ${streak}-day streak` : ""].filter(Boolean).join("\n");
   try {
     if (navigator.share) await navigator.share({ text });
@@ -467,6 +488,7 @@ function wireBoard() {
 }
 
 function init() {
+  noteNewPuzzles();
   initOverlays();
   wireBoard();
 

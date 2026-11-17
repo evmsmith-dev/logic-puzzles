@@ -1,8 +1,10 @@
 // The puzzles in the app. Each one describes itself for Home and How to Play, makes new
-// puzzles from a seed, and applies taps. Everything here is plain data in, plain data out,
+// puzzles from a seed, and applies taps. `grid` gives the board's columns and rows, and
+// `look` how tightly its squares sit (the gap between them and the biggest a square may get). Everything here is plain data in, plain data out,
 // so a game in progress can be saved as JSON and restored after the app closes.
 import { LIGHTS_OUT_LEVELS, createLightsOut, isSolved as lightsOff, press, solve } from "./lights-out.js";
 import { MINESWEEPER_LEVELS, around, createMinesweeper, isCleared, open } from "./minesweeper.js";
+import { QUEEN, QUEENS_LEVELS, CROSS, clashingQueens, createQueens, isSolved as queensPlaced, nextMark, solveByLogic } from "./queens.js";
 import { SLIDING_LEVELS, createSlidingTiles, isSolved as tilesInOrder, slide, solveSmall } from "./sliding-tiles.js";
 
 export const LEVELS = ["easy", "medium", "hard"];
@@ -30,6 +32,8 @@ const lightsOut = {
   },
   isWon: (state) => lightsOff(state.board),
   hint: (state) => solve(state.board, state.size)?.[0] ?? null,
+  grid: (state) => [state.size, state.size],
+  look: { gap: 8, cap: 110 },
 };
 
 const slidingTiles = {
@@ -56,6 +60,8 @@ const slidingTiles = {
   // Hints need the exact solver, which is only quick enough for the 3×3 board.
   hint: (state) => (state.size === 3 ? solveSmall(state.board)?.[0] ?? null : null),
   hasHint: (state) => state.size === 3,
+  grid: (state) => [state.size, state.size],
+  look: { gap: 8, cap: 110 },
 };
 
 const minesweeper = {
@@ -115,8 +121,59 @@ const minesweeper = {
     }
     return null;
   },
+  hintText: () => "That square is safe to dig.",
   minesLeft: (state) => state.mines.filter(Boolean).length - state.flags.filter(Boolean).length,
+  counter: (state) => ["Mines left", minesweeper.minesLeft(state)],
+  grid: (state) => [state.cols, state.rows],
+  look: { gap: 3, cap: 56 },
 };
 
-export const PUZZLES = [lightsOut, slidingTiles, minesweeper];
+const queens = {
+  id: "queens",
+  name: "Queens",
+  // New since the first version: older daily streaks don't need it (see dailyIds in main.js).
+  addedLater: true,
+  emoji: "👑",
+  tagline: "One queen in every row, column and color",
+  sizes: Object.fromEntries(Object.entries(QUEENS_LEVELS).map(([level, { size }]) => [level, `${size}×${size}`])),
+  rules: [
+    "Place one 👑 in every row, every column and every colored region.",
+    "Queens can't touch each other — not even at a corner.",
+    "Tap a square once to mark it ✕ (no queen here), twice for a 👑, and again to clear it.",
+    "Queens that break a rule turn red. Every puzzle can be solved by logic alone.",
+  ],
+  create(level, seed) {
+    const { size, regions, answer } = createQueens(level, seed);
+    const start = new Array(size * size).fill(0);
+    return { size, regions, answer, start, marks: start, par: null };
+  },
+  restart: (state) => ({ ...state, marks: state.start }),
+  tap(state, index) {
+    const marks = state.marks.slice();
+    marks[index] = nextMark(marks[index]);
+    return { state: { ...state, marks }, moved: 1 };
+  },
+  isWon: (state) => queensPlaced(state.regions, state.size, state.marks),
+  // First a queen in the wrong place, then a ✕ over a queen's square, then the next queen
+  // a player could work out.
+  hint(state) {
+    const { size, regions, answer, marks } = state;
+    const wrong = marks.findIndex((mark, i) => mark === QUEEN && !answer.includes(i));
+    if (wrong !== -1) return wrong;
+    const covered = answer.find((cell) => marks[cell] === CROSS);
+    if (covered !== undefined) return covered;
+    const { order } = solveByLogic(regions, size);
+    return order.find((cell) => marks[cell] !== QUEEN) ?? null;
+  },
+  hintText(state, index) {
+    if (!state.answer.includes(index)) return "That queen doesn't belong there.";
+    return state.marks[index] === CROSS ? "A queen goes under that ✕." : "A queen goes in the glowing square.";
+  },
+  counter: (state) => ["Queens", `${state.marks.filter((mark) => mark === QUEEN).length}/${state.size}`],
+  clashes: (state) => clashingQueens(state.regions, state.size, state.marks),
+  grid: (state) => [state.size, state.size],
+  look: { gap: 0, cap: 72 },
+};
+
+export const PUZZLES = [lightsOut, slidingTiles, minesweeper, queens];
 export const puzzleById = (id) => PUZZLES.find((puzzle) => puzzle.id === id);
