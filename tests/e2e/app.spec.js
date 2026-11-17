@@ -1,18 +1,20 @@
 import { expect, test } from "@playwright/test";
 import { solve as solveLights } from "../../src/puzzles/lights-out.js";
 import { createMinesweeper } from "../../src/puzzles/minesweeper.js";
+import { createQueens } from "../../src/puzzles/queens.js";
 import { solveSmall } from "../../src/puzzles/sliding-tiles.js";
 import * as h from "./helpers.js";
 
-test("first visit shows How to Play once; Home lists the daily set and all three puzzles", async ({ page }) => {
+test("first visit shows How to Play once; Home lists the daily set and all four puzzles", async ({ page }) => {
   await h.openApp(page, { help: true });
   await expect(page.locator("#help-overlay")).toBeVisible();
   await expect(page.locator("#help-body")).toContainText("Lights Out");
   await page.locator("#help-overlay .overlay-close").click();
   await expect(page.locator("#help-overlay")).toBeHidden();
-  await expect(page.locator(".puzzle-card")).toHaveCount(3);
-  await expect(page.locator(".daily-item")).toHaveCount(3);
-  await expect(page.locator("#daily-status")).toContainText("0 of 3 done");
+  await expect(page.locator("#help-body")).toContainText("Queens");
+  await expect(page.locator(".puzzle-card")).toHaveCount(4);
+  await expect(page.locator(".daily-item")).toHaveCount(4);
+  await expect(page.locator("#daily-status")).toContainText("0 of 4 done");
   await page.reload();
   await expect(page.locator("#help-overlay")).toBeHidden(); // only the first time
 });
@@ -49,10 +51,11 @@ test("Sliding Tiles: a hint lights up the next tile, and a hinted solve doesn't 
   await expect(page.locator("#game-moves")).toHaveText("0");
 });
 
-test("Minesweeper daily: clearing the board marks it done; finishing all three starts a streak", async ({ page }) => {
-  // The other two daily puzzles are already done today.
-  await h.openApp(page, { storage: { daily: { [h.TODAY]: { "lights-out": { time: 30_000, moves: 7 }, "sliding-tiles": { time: 90_000, moves: 60 } } } } });
-  await expect(page.locator("#daily-status")).toContainText("2 of 3 done");
+test("Minesweeper daily: clearing the board marks it done; finishing all four starts a streak", async ({ page }) => {
+  // The other three daily puzzles are already done today.
+  const done = { "lights-out": { time: 30_000, moves: 7 }, "sliding-tiles": { time: 90_000, moves: 60 }, queens: { time: 60_000, moves: 20 } };
+  await h.openApp(page, { storage: { daily: { [h.TODAY]: done } } });
+  await expect(page.locator("#daily-status")).toContainText("3 of 4 done");
   await page.locator('[data-daily="minesweeper"]').click();
   await expect(page.locator("#game-level")).toContainText("Daily");
   await expect(page.locator("#new-btn")).toBeHidden(); // the daily puzzle is fixed
@@ -83,6 +86,44 @@ test("Minesweeper daily: clearing the board marks it done; finishing all three s
   await expect(page.locator("#daily-streak")).toHaveText("🔥 1-day streak");
   await expect(page.locator("#daily-share-btn")).toBeVisible();
   await expect(page.locator('[data-daily="minesweeper"]')).toHaveClass(/is-done/);
+});
+
+test("Queens: ✕ then queen on a tap, clashing queens turn red, and placing every queen solves it", async ({ page }) => {
+  await h.openApp(page);
+  await h.play(page, "queens", "easy");
+  await expect(h.cells(page)).toHaveCount(36);
+  await expect(page.locator("#game-moves-label")).toHaveText("Queens");
+  await expect(page.locator("#game-moves")).toHaveText("0/6");
+
+  // Rebuild the same board from the saved seed.
+  const { seed } = await page.evaluate(() => JSON.parse(localStorage.getItem("logicPuzzles_current")));
+  const { answer } = createQueens("easy", seed);
+  await h.tapCell(page, 0);
+  await expect(page.locator('#board [data-index="0"]')).toHaveText("✕");
+  await h.tapCell(page, 0);
+  await expect(page.locator('#board [data-index="0"]')).toHaveText("👑");
+  await h.tapCell(page, 1); // a queen next door clashes
+  await h.tapCell(page, 1);
+  await expect(page.locator("#board .is-clash")).toHaveCount(2);
+  await h.tapCell(page, 1); // clear both
+  await h.tapCell(page, 0);
+  await expect(page.locator("#board .is-clash")).toHaveCount(0);
+
+  for (const cell of answer) {
+    await h.tapCell(page, cell);
+    await h.tapCell(page, cell);
+  }
+  await h.expectSolved(page, "Queens solved!");
+  await expect(page.locator("#result-stats")).toContainText("Time");
+});
+
+test("Queens: an old three-puzzle streak survives the update, and today needs Queens too", async ({ page }) => {
+  const three = { "lights-out": { time: 1 }, "sliding-tiles": { time: 1 }, minesweeper: { time: 1 } };
+  const daily = { "2026-11-01": three, "2026-11-02": three, [h.TODAY]: three };
+  await h.openApp(page, { storage: { daily } });
+  await expect(page.locator("#daily-streak")).toHaveText("🔥 2-day streak");
+  await expect(page.locator("#daily-status")).toContainText("3 of 4 done");
+  await expect(page.locator("#daily-share-btn")).toBeHidden();
 });
 
 test("Minesweeper: digging a mine ends the round, and Try again gives the same board back", async ({ page }) => {
@@ -190,7 +231,7 @@ test.describe("phone screens", () => {
     test(`every puzzle at Hard fits a ${name} without scrolling`, async ({ page }) => {
       await page.setViewportSize({ width, height });
       await h.openApp(page);
-      for (const id of ["lights-out", "sliding-tiles", "minesweeper"]) {
+      for (const id of ["lights-out", "sliding-tiles", "minesweeper", "queens"]) {
         if (await page.locator("#game").isVisible()) {
           await page.locator("#game-back-btn").click();
           await expect(page.locator("#home")).toBeVisible();

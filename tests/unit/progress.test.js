@@ -25,7 +25,7 @@ test("only the first finish of a daily puzzle counts, and old days are dropped",
   assert.equal(daily["2026-08-01"], undefined);
 });
 
-test("the streak counts days with all three done, and today's unfinished set doesn't break it", () => {
+test("the streak counts days with every puzzle done, and today's unfinished set doesn't break it", () => {
   const today = "2026-11-03";
   const days = [addDays(today, -1), addDays(today, -2), addDays(today, -3)];
   assert.equal(dailyStreak(allDone(days), today, IDS), 3);
@@ -34,6 +34,20 @@ test("the streak counts days with all three done, and today's unfinished set doe
   assert.equal(dailyStreak({ ...allDone(days), [today]: { a: { time: 1 } } }, today, IDS), 3);
   // A gap ends it.
   assert.equal(dailyStreak(allDone([addDays(today, -2)]), today, IDS), 0);
+});
+
+test("a puzzle added later doesn't break a streak from before it arrived", () => {
+  const today = "2026-11-03";
+  const yesterday = addDays(today, -1);
+  // "d" arrived yesterday: days before it only need a, b and c.
+  const idsFor = (day) => (day >= yesterday ? ["a", "b", "c", "d"] : IDS);
+  const old = allDone([addDays(today, -2), addDays(today, -3)]);
+  assert.equal(dailyStreak(old, today, idsFor), 0, "yesterday wasn't finished");
+  const withYesterday = { ...old, [yesterday]: { a: { time: 1 }, b: { time: 1 }, c: { time: 1 }, d: { time: 1 } } };
+  assert.equal(dailyStreak(withYesterday, today, idsFor), 3);
+  // Three done yesterday isn't enough once "d" is part of the set.
+  const missingD = { ...old, ...allDone([yesterday]) };
+  assert.equal(dailyStreak(missingD, today, idsFor), 0);
 });
 
 test("dates step across months and years", () => {

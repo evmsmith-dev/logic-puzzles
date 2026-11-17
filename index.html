@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Logic Puzzles</title>
-  <meta name="description" content="Lights Out, Sliding Tiles and Minesweeper, with a daily puzzle set. Works offline.">
+  <meta name="description" content="Lights Out, Sliding Tiles, Minesweeper and Queens, with a daily puzzle set. Works offline.">
   <meta name="theme-color" content="#283593">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -47,6 +47,18 @@
       <div class="daily-foot">
         <span id="daily-streak" class="daily-streak"></span>
         <button type="button" id="daily-share-btn" class="link-button" hidden>Share</button>
+      </div>
+    </section>
+
+    <section id="install-card" class="install-card" aria-labelledby="install-title" hidden>
+      <span class="install-emoji" aria-hidden="true">📲</span>
+      <div class="install-text">
+        <h2 id="install-title">Install Logic Puzzles</h2>
+        <p>Play from your home screen, even offline.</p>
+      </div>
+      <div class="install-actions">
+        <button type="button" id="install-btn" class="primary">Install</button>
+        <button type="button" id="install-later" class="link-button">Not now</button>
       </div>
     </section>
 
@@ -103,7 +115,26 @@
         <button type="button" class="theme-btn" data-theme-value="light">Light</button>
         <button type="button" class="theme-btn" data-theme-value="dark">Dark</button>
       </div>
+      <div id="install-setting" hidden>
+        <p class="setting-label">App</p>
+        <button type="button" id="install-setting-btn" class="install-setting-btn">📲 Install Logic Puzzles</button>
+      </div>
       <p class="settings-note">Your best times and daily streak are saved on this device.</p>
+    </div>
+  </div>
+
+  <!-- ==================== Add to Home Screen (iPhone and iPad) ==================== -->
+  <div id="install-overlay" class="overlay" hidden>
+    <div class="overlay-backdrop" data-close></div>
+    <div class="overlay-card" role="dialog" aria-modal="true" aria-labelledby="install-help-title">
+      <button type="button" class="overlay-close" data-close aria-label="Close">✕</button>
+      <h2 id="install-help-title">Add to your Home Screen</h2>
+      <ol class="install-steps">
+        <li>Tap the <strong>Share</strong> button <span class="share-icon" aria-hidden="true">⬆︎</span> in the browser's toolbar.</li>
+        <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+        <li>Tap <strong>Add</strong>. Logic Puzzles appears with your other apps and works offline.</li>
+      </ol>
+      <p class="settings-note">Don't see it? Open this page in Safari and try again.</p>
     </div>
   </div>
 
