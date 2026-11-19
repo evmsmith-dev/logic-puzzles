@@ -1,5 +1,6 @@
 // Draws a puzzle's board as a grid of buttons. The whole board is redrawn after each move;
 // boards are small (at most 140 squares), so this stays quick and keeps the code simple.
+import { has, legalJumps, rowCol } from "../puzzles/peg-jump.js";
 import { puzzleById } from "../puzzles/index.js";
 
 const NUMBER_CLASS = ["", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8"];
@@ -60,24 +61,42 @@ function queenCell(state, i, { clashes }) {
   };
 }
 
-const DRAW = { "lights-out": lightsCell, "sliding-tiles": tileCell, minesweeper: mineCell, queens: queenCell };
+function pegCell(state, i) {
+  const { rows, pegs, selected } = state;
+  const [row, col] = rowCol(i);
+  const where = `row ${row + 1}, hole ${col + 1}`;
+  if (has(pegs, i)) {
+    const picked = i === selected;
+    return { className: `cell peg has-peg${picked ? " is-selected" : ""}`, label: `${picked ? "Picked-up peg" : "Peg"}, ${where}`, text: "" };
+  }
+  const target = selected !== null && legalJumps(rows, pegs).some(([from, , to]) => from === selected && to === i);
+  return { className: `cell peg${target ? " is-target" : ""}`, label: `Empty hole${target ? ", can land here" : ""}, ${where}`, text: "" };
+}
 
-/** Redraws the board. `hint` is a square to highlight; `finished` locks the board. */
+const DRAW = { "lights-out": lightsCell, "sliding-tiles": tileCell, minesweeper: mineCell, queens: queenCell, "peg-jump": pegCell };
+
+/** Redraws the board. `hint` is a square (or list of squares) to highlight; `finished` locks the board. */
 export function renderBoard(boardEl, puzzleId, state, { hint = null, finished = false } = {}) {
   const puzzle = puzzleById(puzzleId);
   const [cols, rows] = puzzle.grid(state);
-  const count = cols * rows;
+  const count = puzzle.cellCount?.(state) ?? cols * rows;
   const draw = DRAW[puzzleId];
+  const hinted = new Set(hint === null ? [] : [hint].flat());
   const clashes = puzzle.clashes?.(state) ?? new Set();
   boardEl.className = `board board-${puzzleId}${finished ? " is-finished" : ""}`;
-  boardEl.style.setProperty("--cols", cols);
+  boardEl.style.setProperty("--cols", puzzle.place ? cols * 2 : cols); // place() uses half-width columns
   const html = [];
   for (let i = 0; i < count; i++) {
     const { className, label, text } = draw(state, i, { finished, clashes });
-    const row = Math.floor(i / cols) + 1;
-    const col = (i % cols) + 1;
-    html.push(`<button type="button" class="${className}${i === hint ? " is-hint" : ""}" data-index="${i}" `
-      + `aria-label="${label}, row ${row}, column ${col}"${finished ? " disabled" : ""}>${text}</button>`);
+    let where = `, row ${Math.floor(i / cols) + 1}, column ${(i % cols) + 1}`;
+    let style = "";
+    if (puzzle.place) {
+      const spot = puzzle.place(state, i);
+      where = ""; // the label says where
+      style = ` style="grid-row:${spot.row};grid-column:${spot.col} / span 2"`;
+    }
+    html.push(`<button type="button" class="${className}${hinted.has(i) ? " is-hint" : ""}" data-index="${i}"${style} `
+      + `aria-label="${label}${where}"${finished ? " disabled" : ""}>${text}</button>`);
   }
   boardEl.innerHTML = html.join("");
 }
@@ -86,10 +105,11 @@ export function renderBoard(boardEl, puzzleId, state, { hint = null, finished = 
 export function fitBoard(areaEl, boardEl, puzzleId, state) {
   const puzzle = puzzleById(puzzleId);
   const [cols, rows] = puzzle.grid(state);
-  const { gap, cap } = puzzle.look;
-  const width = areaEl.clientWidth;
-  const height = areaEl.clientHeight;
+  const { gap, cap, pad = 0 } = puzzle.look;
+  const width = areaEl.clientWidth - 2 * pad;
+  const height = areaEl.clientHeight - 2 * pad;
   const cell = Math.max(24, Math.min(cap, Math.floor(Math.min((width - gap * (cols - 1)) / cols, (height - gap * (rows - 1)) / rows))));
   boardEl.style.setProperty("--cell", `${cell}px`);
   boardEl.style.setProperty("--gap", `${gap}px`);
+  boardEl.style.setProperty("--pad", `${pad}px`);
 }

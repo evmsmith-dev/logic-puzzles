@@ -1,6 +1,6 @@
 // Logic Puzzles: Home, the game screen, pop-ups and saving. The puzzles themselves are in
 // src/puzzles (pure logic); this file wires them to the page.
-import { DAILY_LEVEL, LEVELS, LEVEL_NAMES, PUZZLES, puzzleById } from "./puzzles/index.js";
+import { DAILY_LEVEL, DAILY_PUZZLES, LEVELS, LEVEL_NAMES, PUZZLES, puzzleById } from "./puzzles/index.js";
 import { dailyStreak, dayComplete, formatTime, recordDaily, recordSolve } from "./lib/progress.js";
 import { dateKey, newSeed } from "./lib/random.js";
 import { KEYS, readJson, writeJson } from "./storage.js";
@@ -43,7 +43,7 @@ function noteNewPuzzles() {
 }
 
 /** The puzzles in the daily set on `day`. */
-const dailyIds = (day) => PUZZLES
+const dailyIds = (day) => DAILY_PUZZLES
   .filter((puzzle) => !puzzle.addedLater || (app.firstSeen[puzzle.id] && app.firstSeen[puzzle.id] <= day))
   .map((puzzle) => puzzle.id);
 
@@ -57,12 +57,12 @@ const shortDate = (key) => {
 function renderHome() {
   const today = dateKey();
   const done = app.daily[today] || {};
-  const finished = PUZZLES.filter((puzzle) => done[puzzle.id]).length;
+  const finished = DAILY_PUZZLES.filter((puzzle) => done[puzzle.id]).length;
   byId("daily-date").textContent = shortDate(today);
-  byId("daily-status").textContent = finished === PUZZLES.length
+  byId("daily-status").textContent = finished === DAILY_PUZZLES.length
     ? "All done for today — come back tomorrow for new ones!"
-    : `The same ${inWords(PUZZLES.length)} ${LEVEL_NAMES[DAILY_LEVEL]} puzzles for everyone today. ${finished} of ${PUZZLES.length} done.`;
-  byId("daily-list").innerHTML = PUZZLES.map((puzzle) => {
+    : `The same ${inWords(DAILY_PUZZLES.length)} ${LEVEL_NAMES[DAILY_LEVEL]} puzzles for everyone today. ${finished} of ${DAILY_PUZZLES.length} done.`;
+  byId("daily-list").innerHTML = DAILY_PUZZLES.map((puzzle) => {
     const result = done[puzzle.id];
     return `<button type="button" class="daily-item${result ? " is-done" : ""}" data-daily="${puzzle.id}">
       <span class="daily-emoji" aria-hidden="true">${puzzle.emoji}</span>
@@ -71,7 +71,7 @@ function renderHome() {
     </button>`;
   }).join("");
   const streak = dailyStreak(app.daily, today, dailyIds);
-  byId("daily-streak").textContent = streak ? `🔥 ${streak}-day streak` : `Finish all ${inWords(PUZZLES.length)} to start a streak`;
+  byId("daily-streak").textContent = streak ? `🔥 ${streak}-day streak` : `Finish all ${inWords(DAILY_PUZZLES.length)} to start a streak`;
   byId("daily-share-btn").hidden = !dayComplete(app.daily, today, dailyIds);
 
   byId("puzzle-list").innerHTML = PUZZLES.map((puzzle) => {
@@ -151,6 +151,7 @@ function updateStatus() {
   const par = game.state.par;
   byId("game-par-item").hidden = !par;
   if (par) byId("game-par").textContent = par;
+  if (puzzle.undo) byId("undo-btn").disabled = game.finished || !puzzle.canUndo(game.state);
 }
 
 function drawBoard() {
@@ -171,6 +172,7 @@ function showGame() {
   byId("flag-btn").hidden = game.puzzleId !== "minesweeper";
   setFlagMode(false);
   byId("hint-btn").hidden = puzzle.hasHint ? !puzzle.hasHint(game.state) : false;
+  byId("undo-btn").hidden = !puzzle.undo;
   byId("new-btn").hidden = Boolean(game.daily); // the daily puzzle is fixed for the day
   app.hint = null;
   window.scrollTo(0, 0);
@@ -245,12 +247,27 @@ function flagSquare(index) {
   afterMove(0);
 }
 
+/** Takes back the last move. After a round that ended with no moves left, play carries on. */
+function undoMove() {
+  const { game } = app;
+  const puzzle = game && puzzleById(game.puzzleId);
+  if (!puzzle?.undo || !puzzle.canUndo(game.state)) return;
+  game.state = puzzle.undo(game.state);
+  game.moves = Math.max(0, game.moves - 1);
+  game.finished = false;
+  app.hint = null;
+  drawBoard();
+  startClock();
+  saveGame();
+}
+
 function showHint() {
   const { game } = app;
   if (!game || game.finished) return;
-  const index = puzzleById(game.puzzleId).hint(game.state);
+  const puzzle = puzzleById(game.puzzleId);
+  const index = puzzle.hint(game.state);
   if (index === null) {
-    toast("No hint right now.");
+    toast(puzzle.noHintText?.(game.state) ?? "No hint right now.");
     return;
   }
   game.hinted = true;
@@ -267,19 +284,22 @@ function finishGame(won) {
   const time = game.elapsed;
   drawBoard();
   writeJson(KEYS.current, null);
+  const puzzle = puzzleById(game.puzzleId);
   if (!won) {
     vibrate([60, 40, 60]);
+    const { emoji, title, text, undo } = puzzle.lostResult(game.state);
     showResult({
-      emoji: "💥",
-      title: "Boom!",
-      text: "That square had a mine. Every board can be solved without guessing — try this one again?",
+      emoji,
+      title,
+      text,
       stats: [],
-      primary: ["Try again", () => restartGame()],
-      secondary: game.daily ? ["Home", () => backToHome()] : ["New puzzle", () => startGame(game.puzzleId, game.level)],
+      primary: undo ? ["↶ Undo", () => undoMove()] : ["Try again", () => restartGame()],
+      secondary: undo
+        ? ["Start over", () => restartGame()]
+        : game.daily ? ["Home", () => backToHome()] : ["New puzzle", () => startGame(game.puzzleId, game.level)],
     });
     return;
   }
-  const puzzle = puzzleById(game.puzzleId);
   const result = { time, moves: game.moves, hinted: game.hinted };
   let newBest = { time: false, moves: false };
   if (game.daily) {
@@ -292,17 +312,17 @@ function finishGame(won) {
   vibrate([30, 30, 60]);
   const stats = [
     ["Time", formatTime(time) + (newBest.time ? " 🏅" : "")],
-    game.puzzleId === "minesweeper" ? null : ["Moves", String(game.moves) + (newBest.moves ? " 🏅" : "")],
+    puzzle.showMoves === false ? null : ["Moves", String(game.moves) + (newBest.moves ? " 🏅" : "")],
     game.state.par ? ["Fewest possible", String(game.state.par)] : null,
   ].filter(Boolean);
   const bestNote = newBest.time ? "A new best time!" : game.hinted ? "Solved with a hint — hints don't count toward your best time." : "";
   const today = dateKey();
-  const remaining = PUZZLES.filter((p) => !app.daily[today]?.[p.id]);
-  let text = bestNote;
+  const remaining = DAILY_PUZZLES.filter((p) => !app.daily[today]?.[p.id]);
+  let text = [puzzle.winText?.(game.state), bestNote].filter(Boolean).join(" ");
   if (game.daily) {
     text = remaining.length
       ? `${bestNote ? `${bestNote} ` : ""}${remaining.length} more daily puzzle${remaining.length > 1 ? "s" : ""} to go.`
-      : `That's all ${inWords(PUZZLES.length)} for today! 🔥 ${dailyStreak(app.daily, today, dailyIds)}-day streak.`;
+      : `That's all ${inWords(DAILY_PUZZLES.length)} for today! 🔥 ${dailyStreak(app.daily, today, dailyIds)}-day streak.`;
   }
   showResult({
     emoji: "🎉",
@@ -378,6 +398,12 @@ function askConfirm({ title, text, ok }) {
   });
 }
 
+/** "A, B and C" */
+function listNames(puzzles) {
+  const names = puzzles.map((puzzle) => puzzle.name);
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names.join("");
+}
+
 function showHelp(puzzleId = null) {
   const list = puzzleId ? [puzzleById(puzzleId)] : PUZZLES;
   byId("help-title").textContent = puzzleId ? `How to play ${list[0].name}` : "How to play";
@@ -389,8 +415,8 @@ function showHelp(puzzleId = null) {
     <section class="help-section">
       <h3>📅 Daily puzzles</h3>
       <ul>
-        <li>Every day there's one of each puzzle at ${LEVEL_NAMES[DAILY_LEVEL]} level — the same for everyone.</li>
-        <li>Finish all ${inWords(PUZZLES.length)} to keep your streak going. New puzzles arrive at midnight.</li>
+        <li>Every day there's one ${LEVEL_NAMES[DAILY_LEVEL]} ${listNames(DAILY_PUZZLES)} puzzle — the same for everyone.</li>
+        <li>Finish all ${inWords(DAILY_PUZZLES.length)} to keep your streak going. New puzzles arrive at midnight.</li>
         <li>💡 Hints are there if you're stuck, but a puzzle solved with a hint doesn't set a best time.</li>
       </ul>
     </section>`);
@@ -434,7 +460,7 @@ function celebrate() {
 
 async function shareDaily() {
   const today = dateKey();
-  const lines = PUZZLES.map((puzzle) => {
+  const lines = DAILY_PUZZLES.map((puzzle) => {
     const result = app.daily[today]?.[puzzle.id];
     return `${puzzle.emoji} ${result ? formatTime(result.time) : "—"}${result?.hinted ? " (hint)" : ""}`;
   });
@@ -533,6 +559,7 @@ function init() {
   byId("game-back-btn").addEventListener("click", () => backToHome());
   byId("game-help-btn").addEventListener("click", () => showHelp(app.game?.puzzleId));
   byId("hint-btn").addEventListener("click", showHint);
+  byId("undo-btn").addEventListener("click", undoMove);
   byId("flag-btn").addEventListener("click", () => setFlagMode(!app.flagMode));
   byId("restart-btn").addEventListener("click", async () => {
     if (!app.game) return;

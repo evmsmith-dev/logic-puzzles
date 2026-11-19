@@ -28,6 +28,7 @@
   --q0: #f6a9a9; --q1: #fbc98a; --q2: #f7e48a; --q3: #b2df9d;
   --q4: #9fd3ef; --q5: #c3b2ef; --q6: #f2b0dc; --q7: #96dccb;
   --q-line: #2b2f5a; --q-thin: rgba(31, 35, 80, 0.18);
+  --wood: #e6bf86; --wood-edge: #c8965a; --hole: #7a4f25; --peg: #e5533d; --peg-hi: #ff9a7a;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
@@ -59,6 +60,7 @@
   --q0: #9a4f55; --q1: #9c6a35; --q2: #8f8338; --q3: #4f8045;
   --q4: #3b7598; --q5: #6c5aa3; --q6: #985284; --q7: #2f8574;
   --q-line: #05060f; --q-thin: rgba(0, 0, 0, 0.35);
+  --wood: #7a5634; --wood-edge: #5a3d22; --hole: #2c1b0c; --peg: #ff7a5c; --peg-hi: #ffc2ad;
   color-scheme: dark;
 }
 
@@ -231,8 +233,33 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .queen.is-clash { background-image: repeating-linear-gradient(45deg, var(--danger) 0 6px, transparent 6px 12px); }
 .queen:active { filter: brightness(0.92); }
 
+/* Peg Jump: a wooden triangle with holes; each row is shifted by half a hole. */
+.board-peg-jump {
+  grid-template-columns: repeat(var(--cols), calc((var(--cell) - var(--gap)) / 2));
+  position: relative; isolation: isolate;
+}
+.board-peg-jump::before {
+  content: ""; position: absolute; z-index: -1;
+  inset: calc(var(--pad) * -2.2) calc(var(--pad) * -1.5) calc(var(--pad) * -1);
+  background: linear-gradient(180deg, var(--wood), var(--wood-edge));
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.peg {
+  border-radius: 50%; background: var(--hole);
+  box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.45);
+  transform: scale(0.62); transition: transform 0.12s;
+}
+.peg.has-peg {
+  transform: scale(0.82);
+  background: radial-gradient(circle at 35% 30%, var(--peg-hi) 0 14%, var(--peg) 45%, color-mix(in srgb, var(--peg) 70%, #000) 100%);
+  box-shadow: 0 3px 4px rgba(0, 0, 0, 0.35);
+}
+.peg.is-selected { transform: scale(0.95); box-shadow: 0 0 0 4px var(--accent), 0 6px 10px rgba(0, 0, 0, 0.35); }
+.peg.is-target { transform: scale(0.72); box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.45), 0 0 0 4px var(--accent); }
+.peg.is-hint { outline-offset: 2px; }
+
 /* A hint glows until the next move. */
-.cell.is-hint { outline: 4px solid var(--accent); outline-offset: -4px; animation: hint-pulse 1s ease-in-out infinite; }
+.cell.is-hint { outline: 4px solid var(--accent); outline-offset: -4px; }
 @keyframes hint-pulse { 50% { outline-color: transparent; } }
 .board.is-finished .cell { cursor: default; }
 

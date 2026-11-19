@@ -4,6 +4,7 @@
 // so a game in progress can be saved as JSON and restored after the app closes.
 import { LIGHTS_OUT_LEVELS, createLightsOut, isSolved as lightsOff, press, solve } from "./lights-out.js";
 import { MINESWEEPER_LEVELS, around, createMinesweeper, isCleared, open } from "./minesweeper.js";
+import { PEG_LEVELS, applyJump, createPegJump, fullBoard, goodJump, has, holeCount, legalJumps, pegsLeft, rating, rowCol } from "./peg-jump.js";
 import { QUEEN, QUEENS_LEVELS, CROSS, clashingQueens, createQueens, isSolved as queensPlaced, nextMark, solveByLogic } from "./queens.js";
 import { SLIDING_LEVELS, createSlidingTiles, isSolved as tilesInOrder, slide, solveSmall } from "./sliding-tiles.js";
 
@@ -122,6 +123,12 @@ const minesweeper = {
     return null;
   },
   hintText: () => "That square is safe to dig.",
+  lostResult: () => ({
+    emoji: "💥",
+    title: "Boom!",
+    text: "That square had a mine. Every board can be solved without guessing — try this one again?",
+  }),
+  showMoves: false,
   minesLeft: (state) => state.mines.filter(Boolean).length - state.flags.filter(Boolean).length,
   counter: (state) => ["Mines left", minesweeper.minesLeft(state)],
   grid: (state) => [state.cols, state.rows],
@@ -175,5 +182,80 @@ const queens = {
   look: { gap: 0, cap: 72 },
 };
 
-export const PUZZLES = [lightsOut, slidingTiles, minesweeper, queens];
+const pegJump = {
+  id: "peg-jump",
+  name: "Peg Jump",
+  emoji: "🔺",
+  tagline: "Jump pegs until only one is left",
+  daily: false, // not part of the daily set
+  sizes: Object.fromEntries(Object.entries(PEG_LEVELS).map(([level, { rows }]) => [level, `${holeCount(rows)} holes`])),
+  rules: [
+    "Tap a peg, then the empty hole it should land in. A peg jumps over one neighbor in a straight line, and the jumped peg comes off.",
+    "Keep jumping until no jumps are left. Finish with just one peg to win.",
+    "The fewer pegs left the better: 1 is Genius, 2 is Pretty smart, 3 is Not bad.",
+    "↶ Undo takes back a jump. 💡 Hint shows a jump that can still finish with one peg.",
+  ],
+  create(level, seed) {
+    const { rows, start, pegs } = createPegJump(level, seed);
+    return { rows, start, pegs, selected: null, history: [], par: null };
+  },
+  restart: (state) => ({ ...state, pegs: fullBoard(state.rows) & ~(1 << state.start), selected: null, history: [] }),
+  // Tap a peg to pick it up, then an empty hole to jump there. Tapping an empty hole that only
+  // one peg can reach makes that jump straight away.
+  tap(state, index) {
+    const { rows, pegs, selected } = state;
+    const select = (peg) => ({ state: { ...state, selected: peg }, moved: 0 });
+    const jump = (move) => ({
+      state: { ...state, pegs: applyJump(pegs, move), selected: null, history: [...state.history, pegs] },
+      moved: 1,
+    });
+    if (has(pegs, index)) return select(selected === index ? null : index);
+    const jumps = legalJumps(rows, pegs);
+    if (selected !== null) {
+      const move = jumps.find(([from, , to]) => from === selected && to === index);
+      return move ? jump(move) : select(null);
+    }
+    const into = jumps.filter(([, , to]) => to === index);
+    return into.length === 1 ? jump(into[0]) : { state, moved: 0 };
+  },
+  undo: (state) => (state.history.length
+    ? { ...state, pegs: state.history.at(-1), history: state.history.slice(0, -1), selected: null }
+    : state),
+  canUndo: (state) => state.history.length > 0,
+  isWon: (state) => pegsLeft(state.pegs) === 1,
+  isLost: (state) => pegsLeft(state.pegs) > 1 && legalJumps(state.rows, state.pegs).length === 0,
+  winText: () => "Genius! Just one peg left.",
+  lostResult(state) {
+    const left = pegsLeft(state.pegs);
+    const { emoji, words } = rating(left);
+    return {
+      emoji,
+      title: `${left} pegs left — ${words}`,
+      text: "No more jumps. Undo a few jumps or start over to get down to one peg.",
+      undo: true,
+    };
+  },
+  /** The peg to move and the hole it lands in. */
+  hint(state) {
+    const move = goodJump(state.rows, state.pegs);
+    return move ? [move[0], move[2]] : null;
+  },
+  hintText: () => "Jump the glowing peg into the glowing hole.",
+  noHintText: () => "One peg isn't possible from here any more. Undo a few jumps and try another way.",
+  counter: (state) => ["Pegs left", pegsLeft(state.pegs)],
+  showMoves: false,
+  // The triangle sits on a grid of half-width columns, so each row is shifted by half a hole.
+  grid: (state) => [state.rows, state.rows],
+  cellCount: (state) => holeCount(state.rows),
+  place(state, index) {
+    const [row, col] = rowCol(index);
+    return { row: row + 1, col: state.rows - row + 2 * col };
+  },
+  look: { gap: 6, cap: 84, pad: 24 },
+};
+
+export const PUZZLES = [lightsOut, slidingTiles, minesweeper, queens, pegJump];
+
+/** The puzzles in the daily set. */
+export const DAILY_PUZZLES = PUZZLES.filter((puzzle) => puzzle.daily !== false);
 export const puzzleById = (id) => PUZZLES.find((puzzle) => puzzle.id === id);

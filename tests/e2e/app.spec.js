@@ -5,14 +5,14 @@ import { createQueens } from "../../src/puzzles/queens.js";
 import { solveSmall } from "../../src/puzzles/sliding-tiles.js";
 import * as h from "./helpers.js";
 
-test("first visit shows How to Play once; Home lists the daily set and all four puzzles", async ({ page }) => {
+test("first visit shows How to Play once; Home lists the four daily puzzles and all five puzzles", async ({ page }) => {
   await h.openApp(page, { help: true });
   await expect(page.locator("#help-overlay")).toBeVisible();
   await expect(page.locator("#help-body")).toContainText("Lights Out");
   await page.locator("#help-overlay .overlay-close").click();
   await expect(page.locator("#help-overlay")).toBeHidden();
   await expect(page.locator("#help-body")).toContainText("Queens");
-  await expect(page.locator(".puzzle-card")).toHaveCount(4);
+  await expect(page.locator(".puzzle-card")).toHaveCount(5);
   await expect(page.locator(".daily-item")).toHaveCount(4);
   await expect(page.locator("#daily-status")).toContainText("0 of 4 done");
   await page.reload();
@@ -126,6 +126,75 @@ test("Queens: an old three-puzzle streak survives the update, and today needs Qu
   await expect(page.locator("#daily-share-btn")).toBeHidden();
 });
 
+test("Peg Jump: pick up a peg, jump, undo, and follow hints down to one peg", async ({ page }) => {
+  await h.openApp(page);
+  await h.play(page, "peg-jump", "easy");
+  await expect(h.cells(page)).toHaveCount(15);
+  await expect(page.locator("#game-moves-label")).toHaveText("Pegs left");
+  await expect(page.locator("#game-moves")).toHaveText("14");
+  await expect(page.locator("#undo-btn")).toBeVisible();
+  await expect(page.locator("#undo-btn")).toBeDisabled();
+
+  // The hint lights up a peg and the hole it should land in.
+  await page.locator("#hint-btn").click();
+  await expect(page.locator("#board .is-hint")).toHaveCount(2);
+  const [from, to] = await page.locator("#board .is-hint").evaluateAll((cells) => cells.map((c) => Number(c.dataset.index)));
+  const peg = await page.locator(`#board [data-index="${from}"]`).getAttribute("class");
+  const hintedFrom = peg.includes("has-peg") ? from : to;
+  const hintedTo = hintedFrom === from ? to : from;
+  await h.tapCell(page, hintedFrom);
+  await expect(page.locator(`#board [data-index="${hintedFrom}"]`)).toHaveClass(/is-selected/);
+  await expect(page.locator(`#board [data-index="${hintedTo}"]`)).toHaveClass(/is-target/);
+  await h.tapCell(page, hintedTo);
+  await expect(page.locator("#game-moves")).toHaveText("13");
+  await page.locator("#undo-btn").click();
+  await expect(page.locator("#game-moves")).toHaveText("14");
+
+  // Follow hints to the end.
+  for (let left = 14; left > 1; left--) {
+    await page.locator("#hint-btn").click();
+    const cells = await page.locator("#board .is-hint").evaluateAll((list) => list.map((c) => ({ i: Number(c.dataset.index), peg: c.classList.contains("has-peg") })));
+    await h.tapCell(page, cells.find((c) => c.peg).i);
+    await h.tapCell(page, cells.find((c) => !c.peg).i);
+  }
+  await h.expectSolved(page, "Peg Jump solved!");
+  await expect(page.locator("#result-text")).toContainText("Genius");
+});
+
+test("Peg Jump: getting stuck shows a rating, and Undo carries on from there", async ({ page }) => {
+  await h.openApp(page);
+  await h.play(page, "peg-jump", "easy");
+  // Jump at random until stuck (or, rarely, solved).
+  for (let i = 0; i < 13; i++) {
+    const moved = await page.evaluate(() => {
+      // The board is redrawn after every tap, so look squares up again each time.
+      const cell = (i) => document.querySelector(`#board [data-index="${i}"]`);
+      for (let i = 0; i < 15; i++) {
+        if (!cell(i).classList.contains("has-peg")) continue;
+        cell(i).click();
+        const target = document.querySelector("#board .is-target");
+        if (target) {
+          target.click();
+          return true;
+        }
+        cell(i).click(); // put it back down
+      }
+      return false;
+    });
+    if (!moved) break;
+  }
+  const left = Number(await page.locator("#game-moves").textContent());
+  test.skip(left === 1, "random jumps happened to solve it");
+  await page.clock.runFor(600); // the result pop-up appears after a moment
+  await expect(page.locator("#result-overlay")).toBeVisible();
+  await expect(page.locator("#result-title")).toContainText(`${left} pegs left`);
+  await expect(page.locator("#result-primary")).toHaveText("↶ Undo");
+  await page.locator("#result-primary").click();
+  await expect(page.locator("#result-overlay")).toBeHidden();
+  await expect(page.locator("#game-moves")).toHaveText(String(left + 1));
+  await expect(page.locator("#undo-btn")).toBeEnabled();
+});
+
 test("Minesweeper: digging a mine ends the round, and Try again gives the same board back", async ({ page }) => {
   await h.openApp(page);
   await h.play(page, "minesweeper", "easy");
@@ -231,7 +300,7 @@ test.describe("phone screens", () => {
     test(`every puzzle at Hard fits a ${name} without scrolling`, async ({ page }) => {
       await page.setViewportSize({ width, height });
       await h.openApp(page);
-      for (const id of ["lights-out", "sliding-tiles", "minesweeper", "queens"]) {
+      for (const id of ["lights-out", "sliding-tiles", "minesweeper", "queens", "peg-jump"]) {
         if (await page.locator("#game").isVisible()) {
           await page.locator("#game-back-btn").click();
           await expect(page.locator("#home")).toBeVisible();
