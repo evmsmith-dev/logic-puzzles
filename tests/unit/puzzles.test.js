@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LIGHTS_OUT_LEVELS, createLightsOut, isSolved as lightsOff, press, solve } from "../../src/puzzles/lights-out.js";
 import { MINESWEEPER_LEVELS, countMines, createMinesweeper, isCleared, open, solvableWithoutGuessing } from "../../src/puzzles/minesweeper.js";
+import { PEG_LEVELS, allJumps, applyJump, canFinish, createPegJump, fullBoard, goodJump, holeAt, holeCount, legalJumps, pegsLeft, rating, rowCol, startHoles } from "../../src/puzzles/peg-jump.js";
 import { CROSS, QUEEN, QUEENS_LEVELS, clashingQueens, countSolutions, createQueens, isSolved as queensPlaced, nextMark, solveByLogic, touching } from "../../src/puzzles/queens.js";
 import { createSlidingTiles, isSolvable, isSolved as tilesInOrder, slide, solveSmall, solvedBoard } from "../../src/puzzles/sliding-tiles.js";
-import { PUZZLES } from "../../src/puzzles/index.js";
+import { DAILY_PUZZLES, PUZZLES } from "../../src/puzzles/index.js";
 
 const LEVELS = ["easy", "medium", "hard"];
 
@@ -230,6 +231,101 @@ test("Queens: hints point out a wrong queen, then a ✕ over a queen, then the n
   assert.ok(queens.isWon(state));
 });
 
+// ---------- Peg Jump ----------
+
+const pegJump = PUZZLES.find((puzzle) => puzzle.id === "peg-jump");
+
+/** Plays the hinted jump, the way a player following hints would. */
+function followHint(state) {
+  const [from, to] = pegJump.hint(state);
+  return pegJump.tap(pegJump.tap(state, from).state, to).state;
+}
+
+test("Peg Jump: board shape, jumps and hole numbering", () => {
+  assert.equal(holeCount(5), 15);
+  assert.equal(holeCount(6), 21);
+  assert.deepEqual(rowCol(holeAt(3, 2)), [3, 2]);
+  // On the 15-hole board a peg in a corner has two jumps; the classic board has 36 jumps in all.
+  assert.equal(allJumps(5).filter(([from]) => from === 0).length, 2);
+  assert.equal(allJumps(5).length, 36);
+  // The top hole empty: only the two pegs two rows down can jump into it.
+  const pegs = fullBoard(5) & ~1;
+  assert.deepEqual(legalJumps(5, pegs).map(([from, over, to]) => [from, over, to]).sort(), [[3, 1, 0], [5, 2, 0]]);
+  assert.equal(pegsLeft(applyJump(pegs, [3, 1, 0])), 13);
+});
+
+test("Peg Jump: every starting hole can finish with one peg, and Easy and Medium split the 15 holes", () => {
+  for (const level of LEVELS) {
+    const { rows } = PEG_LEVELS[level];
+    for (const hole of startHoles(level)) assert.ok(canFinish(rows, fullBoard(rows) & ~(1 << hole)), `${level} ${hole}`);
+  }
+  const easy = startHoles("easy");
+  const medium = startHoles("medium");
+  assert.ok(easy.length && medium.length);
+  assert.equal(easy.length + medium.length, 15);
+  assert.ok(easy.every((hole) => !medium.includes(hole)));
+  assert.ok(easy.includes(0), "the top corner is an Easy start");
+  assert.equal(startHoles("hard").length, 21);
+});
+
+test("Peg Jump: the same seed makes the same board", () => {
+  assert.deepEqual(createPegJump("hard", "abc"), createPegJump("hard", "abc"));
+});
+
+test("Peg Jump: tap a peg then a hole to jump; a tap on a hole only one peg can reach jumps at once", () => {
+  let state = { ...pegJump.create("easy", "x"), pegs: fullBoard(5) & ~1, start: 0 };
+  state = pegJump.tap(state, 3).state;
+  assert.equal(state.selected, 3);
+  assert.equal(pegJump.tap(state, 3).state.selected, null, "tapping it again puts it down");
+  const { state: jumped, moved } = pegJump.tap(state, 0);
+  assert.equal(moved, 1);
+  assert.equal(pegsLeft(jumped.pegs), 13);
+  assert.equal(jumped.history.length, 1);
+  // Now hole 3 is empty and only peg 10 (two below) or peg 5 (across) can reach it: two choices,
+  // so a tap on hole 3 with nothing picked up does nothing.
+  assert.equal(pegJump.tap(jumped, 3).moved, 0);
+  // Hole 1 is empty too, and only peg 8 (over 4) can reach it, so tapping hole 1 jumps.
+  const auto = pegJump.tap(jumped, 1);
+  assert.equal(auto.moved, 1);
+  assert.equal(pegsLeft(auto.state.pegs), 12);
+  // Undo puts the jumped pegs back.
+  const undone = pegJump.undo(jumped);
+  assert.equal(undone.pegs, fullBoard(5) & ~1);
+  assert.ok(!pegJump.canUndo(undone));
+});
+
+for (const level of LEVELS) {
+  test(`Peg Jump ${level}: following hints always ends with one peg`, () => {
+    for (let i = 0; i < 10; i++) {
+      let state = pegJump.create(level, `hint-${i}`);
+      while (!pegJump.isWon(state)) {
+        assert.ok(!pegJump.isLost(state));
+        state = followHint(state);
+      }
+      assert.equal(pegsLeft(state.pegs), 1);
+      assert.equal(state.history.length, holeCount(PEG_LEVELS[level].rows) - 2);
+    }
+  });
+}
+
+test("Peg Jump: stuck with pegs left ends the round with a rating, and hints say to undo", () => {
+  // Two pegs far apart on the 15-hole board: no jumps left.
+  const state = { ...pegJump.create("easy", "x"), pegs: (1 << 0) | (1 << 14) };
+  assert.ok(pegJump.isLost(state));
+  assert.equal(pegJump.lostResult(state).title, "2 pegs left — Pretty smart");
+  assert.equal(pegJump.hint(state), null);
+  assert.equal(goodJump(5, state.pegs), null);
+  assert.match(pegJump.noHintText(state), /Undo/);
+  assert.equal(rating(1).words, "Genius!");
+  assert.equal(rating(5).words, "Keep practicing");
+});
+
+test("Peg Jump stays out of the daily set", () => {
+  assert.equal(pegJump.daily, false);
+  assert.ok(!DAILY_PUZZLES.includes(pegJump));
+  assert.equal(DAILY_PUZZLES.length, 4);
+});
+
 // ---------- Moves through the shared puzzle interface ----------
 
 test("every puzzle: restart returns to the starting board, and a tap never changes the start", () => {
@@ -240,7 +336,8 @@ test("every puzzle: restart returns to the starting board, and a tap never chang
     for (let i = 0; i < 5; i++) current = puzzle.tap(current, i * 3, {}).state;
     assert.equal(JSON.stringify(current.start), startCopy, puzzle.id);
     const restarted = puzzle.restart(current);
-    assert.equal(JSON.stringify(restarted.board ?? restarted.revealed ?? restarted.marks), startCopy, puzzle.id);
+    const board = (s) => s.board ?? s.revealed ?? s.marks ?? s.pegs;
+    assert.equal(JSON.stringify(board(restarted)), JSON.stringify(board(state)), puzzle.id);
   }
 });
 

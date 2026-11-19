@@ -2,7 +2,7 @@
   "name": "logic-puzzles",
   "private": true,
   "version": "1.0.0",
-  "description": "Logic puzzle progressive web app: Lights Out, Sliding Tiles, Minesweeper and Queens",
+  "description": "Logic puzzle progressive web app: Lights Out, Sliding Tiles, Minesweeper, Queens and Peg Jump",
   "type": "module",
   "scripts": {
     "start": "node scripts/serve.mjs . 8080",
