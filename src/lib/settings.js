@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS = {
   sound: true, // sound effects
   music: false,
   musicVolume: 0.3, // 0 to 1
+  musicStyle: "mix", // "mix" (each puzzle its own), "lofi" or "marimba"
   autoCross: false, // Queens: ✕ the squares a new queen rules out
   regionLetters: false, // Queens: a letter in each colored region
   largeText: false,

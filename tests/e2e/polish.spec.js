@@ -73,15 +73,19 @@ test("music plays during a game when switched on, with its own volume", async ({
   await openSettings(page);
   await expect(page.locator("#set-music")).not.toBeChecked(); // off by default
   await expect(page.locator("#music-volume-row")).toBeHidden();
+  await expect(page.locator("#music-style-row")).toBeHidden();
   await page.locator("#set-music").check();
   await expect(page.locator("#music-volume-row")).toBeVisible();
+  await expect(page.locator('[data-music-style="mix"]')).toHaveAttribute("aria-pressed", "true");
+  await page.locator('[data-music-style="marimba"]').click();
+  await expect(page.locator('[data-music-style="marimba"]')).toHaveAttribute("aria-pressed", "true");
   await page.locator("#set-music-volume").fill("60");
   await closeSettings(page);
   await h.play(page, "queens", "easy");
   await page.clock.runFor(1_000);
   expect((await feel(page)).oscillators).toBeGreaterThan(2); // the first chord
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("logicPuzzles_settings")));
-  expect(saved).toMatchObject({ music: true, musicVolume: 0.6 });
+  expect(saved).toMatchObject({ music: true, musicVolume: 0.6, musicStyle: "marimba" });
 });
 
 test("Peg Jump ending with pegs left feels neutral, not like losing", async ({ page }) => {

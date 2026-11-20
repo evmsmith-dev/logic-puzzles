@@ -497,9 +497,16 @@ function showSettings() {
   const settings = getSettings();
   for (const [id, name] of Object.entries(SWITCHES)) byId(id).checked = settings[name];
   byId("set-music-volume").value = Math.round(settings.musicVolume * 100);
-  byId("music-volume-row").hidden = !settings.music;
+  showMusicOptions(settings);
   byId("vibration-row").hidden = !hapticsAvailable();
   openOverlay("settings-overlay");
+}
+
+/** Music style and volume show only while music is on. */
+function showMusicOptions(settings) {
+  byId("music-volume-row").hidden = !settings.music;
+  byId("music-style-row").hidden = !settings.music;
+  document.querySelectorAll(".music-style-btn").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.musicStyle === settings.musicStyle)));
 }
 
 /** Settings that change the page itself. */
@@ -667,9 +674,10 @@ function wireSettings() {
     byId(id).addEventListener("change", (event) => updateSettings({ [name]: event.target.checked }));
   }
   byId("set-music-volume").addEventListener("input", (event) => updateSettings({ musicVolume: Number(event.target.value) / 100 }));
+  document.querySelectorAll(".music-style-btn").forEach((button) => button.addEventListener("click", () => updateSettings({ musicStyle: button.dataset.musicStyle })));
   onSettingsChange((settings, changes) => {
     applySettings(settings);
-    byId("music-volume-row").hidden = !settings.music;
+    showMusicOptions(settings);
     if ("sound" in changes || "music" in changes || "musicVolume" in changes) audioSettingsChanged();
     if ("vibration" in changes && settings.vibration) buzz("tap");
     if (app.game && ("regionLetters" in changes || "relaxed" in changes)) drawBoard();

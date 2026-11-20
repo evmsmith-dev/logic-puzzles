@@ -3,6 +3,11 @@
 // set up until the first one. On iPhone the "ambient" audio session respects the silent switch
 // and mixes with the player's own music instead of stopping it.
 import { setting } from "../lib/settings.js";
+import { makeKit, musicFor, scheduleBar } from "./music.js";
+
+// The music has a beat and a bass line, so it sits a little lower than the volume slider says,
+// keeping sound effects clearly on top.
+const MUSIC_LEVEL = 0.7;
 
 let ctx = null;
 let master = null;
@@ -147,51 +152,35 @@ export function play(name, detail = {}) {
 
 // ---------- Music ----------
 //
-// Slow, quiet chords on a pentatonic scale through a soft filter, with an occasional bell note.
-// Each puzzle has its own key and sound, so each game has its own mood without any files.
-
-const MOODS = {
-  "lights-out": { root: 196, wave: "sine", filter: 1100, bell: 0.35 },
-  "sliding-tiles": { root: 174.6, wave: "triangle", filter: 800, bell: 0.2 },
-  minesweeper: { root: 146.8, wave: "sine", filter: 700, bell: 0.15 },
-  queens: { root: 220, wave: "triangle", filter: 1000, bell: 0.3 },
-  "peg-jump": { root: 164.8, wave: "sine", filter: 900, bell: 0.25 },
-};
-const CHORD_SECONDS = 6;
+// The music itself is in music.js. Here it's started, stopped and faded. Bars are scheduled
+// a little ahead (checked twice a second) so timing stays steady.
 
 let mood = null; // puzzle id while a game is open
 let musicTimer = null;
-let nextChordAt = 0;
-let step = 0;
+let musicKit = null;
+let nextBarAt = 0;
+let barNumber = 0;
 
-function scheduleChords() {
-  const { root, wave, filter, bell } = MOODS[mood] ?? MOODS["lights-out"];
-  while (nextChordAt < now() + 1) {
-    const start = nextChordAt - now();
-    // Wander around the scale a step or two at a time.
-    step += [-2, -1, 1, 2][Math.floor(Math.random() * 4)];
-    step = Math.max(-3, Math.min(4, step));
-    for (const offset of [0, 2, 4]) {
-      tone({ freq: noteFreq(root, step + offset), type: wave, start, attack: 2, decay: CHORD_SECONDS + 1, gain: 0.05, filter, bus: musicBus });
-    }
-    if (Math.random() < bell) {
-      tone({ freq: noteFreq(root * 4, step + Math.floor(Math.random() * 5)), start: start + 1 + Math.random() * 3, attack: 0.01, decay: 2.5, gain: 0.025, bus: musicBus });
-    }
-    nextChordAt += CHORD_SECONDS;
+function scheduleMusic() {
+  const { style, root } = musicFor(mood, setting("musicStyle"));
+  while (nextBarAt < now() + 1.2) {
+    nextBarAt = scheduleBar(musicKit, style, root, nextBarAt, barNumber++);
   }
 }
 
 function syncMusic() {
   if (!ctx) return;
   const wanted = setting("music") && mood !== null && document.visibilityState === "visible";
-  const volume = wanted ? setting("musicVolume") * 0.9 : 0;
+  const volume = wanted ? setting("musicVolume") * MUSIC_LEVEL : 0;
   musicBus.gain.cancelScheduledValues(now());
   musicBus.gain.setValueAtTime(musicBus.gain.value, now());
-  musicBus.gain.linearRampToValueAtTime(volume, now() + (wanted ? 2 : 0.6));
+  musicBus.gain.linearRampToValueAtTime(volume, now() + (wanted ? 1.5 : 0.6));
   if (wanted && !musicTimer) {
-    nextChordAt = now() + 0.1;
-    scheduleChords();
-    musicTimer = setInterval(scheduleChords, 500);
+    musicKit ??= makeKit(ctx, musicBus);
+    nextBarAt = now() + 0.1;
+    barNumber = 0;
+    scheduleMusic();
+    musicTimer = setInterval(scheduleMusic, 500);
   } else if (!wanted && musicTimer) {
     clearInterval(musicTimer);
     musicTimer = null;
@@ -207,7 +196,7 @@ export function setMood(puzzleId) {
 /** Turns music down for a moment so a win chime stands out. */
 function duckMusic() {
   if (!musicTimer) return;
-  const volume = setting("musicVolume") * 0.9;
+  const volume = setting("musicVolume") * MUSIC_LEVEL;
   musicBus.gain.cancelScheduledValues(now());
   musicBus.gain.setValueAtTime(musicBus.gain.value, now());
   musicBus.gain.linearRampToValueAtTime(volume * 0.3, now() + 0.2);
