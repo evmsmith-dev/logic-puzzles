@@ -5,18 +5,45 @@ import { createQueens } from "../../src/puzzles/queens.js";
 import { solveSmall } from "../../src/puzzles/sliding-tiles.js";
 import * as h from "./helpers.js";
 
-test("first visit shows How to Play once; Home lists the four daily puzzles and all five puzzles", async ({ page }) => {
+test("first visit: Home lists the puzzles, and each puzzle's rules show the first time it's opened", async ({ page }) => {
   await h.openApp(page, { help: true });
-  await expect(page.locator("#help-overlay")).toBeVisible();
-  await expect(page.locator("#help-body")).toContainText("Lights Out");
-  await page.locator("#help-overlay .overlay-close").click();
-  await expect(page.locator("#help-overlay")).toBeHidden();
-  await expect(page.locator("#help-body")).toContainText("Queens");
+  await expect(page.locator("#help-overlay")).toBeHidden(); // no wall of rules on Home
   await expect(page.locator(".puzzle-card")).toHaveCount(5);
   await expect(page.locator(".daily-item")).toHaveCount(4);
   await expect(page.locator("#daily-status")).toContainText("0 of 4 done");
-  await page.reload();
+
+  await h.play(page, "queens", "easy");
+  await expect(page.locator("#help-overlay")).toBeVisible();
+  await expect(page.locator("#help-title")).toHaveText("How to play Queens");
+  // The clock waits while the rules are open.
+  await page.clock.runFor(5_000);
+  await expect(page.locator("#game-time")).toHaveText("0:00");
+  await page.locator("#help-overlay .overlay-close").click();
+  await expect(page.locator("#help-overlay")).toBeHidden();
+  await page.clock.runFor(3_000);
+  await expect(page.locator("#game-time")).toHaveText("0:03");
+
+  await page.locator("#game-back-btn").click();
+  await h.play(page, "queens", "easy");
   await expect(page.locator("#help-overlay")).toBeHidden(); // only the first time
+  await page.locator("#game-help-btn").click(); // still there on the ? button
+  await expect(page.locator("#help-title")).toHaveText("How to play Queens");
+});
+
+test("a player from before per-puzzle rules doesn't see rules again for puzzles they've played", async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("seeded")) return;
+    sessionStorage.setItem("seeded", "1");
+    localStorage.setItem("logicPuzzles_helpSeen", "true");
+    localStorage.setItem("logicPuzzles_stats", JSON.stringify({ "lights-out": { easy: { solved: 1, bestTime: 1000, bestMoves: 3 } } }));
+  });
+  await page.goto("index.html");
+  await expect(page.locator("body.is-ready")).toBeAttached();
+  await h.play(page, "lights-out", "easy");
+  await expect(page.locator("#help-overlay")).toBeHidden();
+  await page.locator("#game-back-btn").click();
+  await h.play(page, "peg-jump", "easy");
+  await expect(page.locator("#help-title")).toHaveText("How to play Peg Jump");
 });
 
 test("Lights Out: solving it shows the result, and the best time appears on Home", async ({ page }) => {
@@ -88,7 +115,7 @@ test("Minesweeper daily: clearing the board marks it done; finishing all four st
   await expect(page.locator('[data-daily="minesweeper"]')).toHaveClass(/is-done/);
 });
 
-test("Queens: ✕ then queen on a tap, clashing queens turn red, and placing every queen solves it", async ({ page }) => {
+test("Queens: queen then ✕ on a tap, clashing queens turn red, and placing every queen solves it", async ({ page }) => {
   await h.openApp(page);
   await h.play(page, "queens", "easy");
   await expect(h.cells(page)).toHaveCount(36);
@@ -99,20 +126,20 @@ test("Queens: ✕ then queen on a tap, clashing queens turn red, and placing eve
   const { seed } = await page.evaluate(() => JSON.parse(localStorage.getItem("logicPuzzles_current")));
   const { answer } = createQueens("easy", seed);
   await h.tapCell(page, 0);
+  await expect(page.locator('#board [data-index="0"]')).toHaveText("👑");
+  await h.tapCell(page, 0);
   await expect(page.locator('#board [data-index="0"]')).toHaveText("✕");
   await h.tapCell(page, 0);
-  await expect(page.locator('#board [data-index="0"]')).toHaveText("👑");
-  await h.tapCell(page, 1); // a queen next door clashes
-  await h.tapCell(page, 1);
-  await expect(page.locator("#board .is-clash")).toHaveCount(2);
-  await h.tapCell(page, 1); // clear both
+  await expect(page.locator('#board [data-index="0"]')).toHaveText("");
   await h.tapCell(page, 0);
+  await h.tapCell(page, 1); // a queen next door clashes
+  await expect(page.locator("#board .is-clash")).toHaveCount(2);
+  await page.locator("#undo-btn").click(); // undo takes the second queen back
   await expect(page.locator("#board .is-clash")).toHaveCount(0);
+  await page.locator("#undo-btn").click();
+  await expect(page.locator('#board [data-index="0"]')).toHaveText("");
 
-  for (const cell of answer) {
-    await h.tapCell(page, cell);
-    await h.tapCell(page, cell);
-  }
+  for (const cell of answer) await h.tapCell(page, cell);
   await h.expectSolved(page, "Queens solved!");
   await expect(page.locator("#result-stats")).toContainText("Time");
 });
@@ -188,6 +215,7 @@ test("Peg Jump: getting stuck shows a rating, and Undo carries on from there", a
   await page.clock.runFor(600); // the result pop-up appears after a moment
   await expect(page.locator("#result-overlay")).toBeVisible();
   await expect(page.locator("#result-title")).toContainText(`${left} pegs left`);
+  await expect(page.locator("#result-text")).toContainText("Can you get down to one peg?");
   await expect(page.locator("#result-primary")).toHaveText("↶ Undo");
   await page.locator("#result-primary").click();
   await expect(page.locator("#result-overlay")).toBeHidden();

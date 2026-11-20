@@ -26,7 +26,7 @@
   --n1: #1e63d6; --n2: #2e7d32; --n3: #c62828; --n4: #4527a0;
   --n5: #8d3a00; --n6: #00838f; --n7: #37474f; --n8: #757575;
   --q0: #f6a9a9; --q1: #fbc98a; --q2: #f7e48a; --q3: #b2df9d;
-  --q4: #9fd3ef; --q5: #c3b2ef; --q6: #f2b0dc; --q7: #96dccb;
+  --q4: #9fd3ef; --q5: #c3b2ef; --q6: #f2b0dc; --q7: #d3cbc0;
   --q-line: #2b2f5a; --q-thin: rgba(31, 35, 80, 0.18);
   --wood: #e6bf86; --wood-edge: #c8965a; --hole: #7a4f25; --peg: #e5533d; --peg-hi: #ff9a7a;
   color-scheme: light;
@@ -57,8 +57,8 @@
   --shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   --n1: #82b1ff; --n2: #81c784; --n3: #ff8a80; --n4: #b39ddb;
   --n5: #ffb74d; --n6: #4dd0e1; --n7: #cfd8dc; --n8: #9e9e9e;
-  --q0: #9a4f55; --q1: #9c6a35; --q2: #8f8338; --q3: #4f8045;
-  --q4: #3b7598; --q5: #6c5aa3; --q6: #985284; --q7: #2f8574;
+  --q0: #9a4f55; --q1: #a8652a; --q2: #a39222; --q3: #3f7a3a;
+  --q4: #2f62a8; --q5: #6c5aa3; --q6: #985284; --q7: #6a645c;
   --q-line: #05060f; --q-thin: rgba(0, 0, 0, 0.35);
   --wood: #7a5634; --wood-edge: #5a3d22; --hole: #2c1b0c; --peg: #ff7a5c; --peg-hi: #ffc2ad;
   color-scheme: dark;
@@ -66,6 +66,9 @@
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
+html.large-text { font-size: 118%; }
+/* Relaxed mode hides the clock. */
+html.relaxed #game-time-item { display: none; }
 body {
   margin: 0;
   min-height: 100dvh;
@@ -178,6 +181,9 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08); font-variant-numeric: tabular-nums;
 }
 .board-area { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 6px 0; }
+/* A board too big for the screen (Minesweeper Hard on a narrow phone) scrolls instead of shrinking. */
+.board-area.is-scrolling { overflow: auto; justify-content: flex-start; align-items: flex-start; -webkit-overflow-scrolling: touch; }
+.board-area.is-scrolling .board { margin: auto; }
 .board {
   display: grid;
   grid-template-columns: repeat(var(--cols), var(--cell, 48px));
@@ -187,7 +193,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 .cell {
-  border: 0; padding: 0; border-radius: 12px;
+  position: relative; border: 0; padding: 0; border-radius: 12px;
   display: flex; align-items: center; justify-content: center;
   font-weight: 700;
 }
@@ -228,10 +234,18 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .queen.el { border-left: 3px solid var(--q-line); }
 .q0 { background: var(--q0); } .q1 { background: var(--q1); } .q2 { background: var(--q2); } .q3 { background: var(--q3); }
 .q4 { background: var(--q4); } .q5 { background: var(--q5); } .q6 { background: var(--q6); } .q7 { background: var(--q7); }
-.queen.is-cross { font-size: calc(var(--cell) * 0.4); opacity: 0.75; }
-:root[data-theme="dark"] .queen.is-cross { color: var(--text); }
+.queen.is-cross { font-size: calc(var(--cell) * 0.4); color: color-mix(in srgb, var(--q-line) 75%, transparent); }
+:root[data-theme="dark"] .queen.is-cross { color: color-mix(in srgb, var(--text) 75%, transparent); }
 .queen.is-clash { background-image: repeating-linear-gradient(45deg, var(--danger) 0 6px, transparent 6px 12px); }
 .queen:active { filter: brightness(0.92); }
+.queen.is-auto { color: color-mix(in srgb, var(--q-line) 45%, transparent); } /* only the ✕ fades */
+:root[data-theme="dark"] .queen.is-auto { color: color-mix(in srgb, var(--text) 45%, transparent); }
+.board-queens { touch-action: none; } /* drag across squares to mark ✕ */
+.queen[data-letter]::before {
+  content: attr(data-letter); position: absolute; top: 2px; left: 4px;
+  font-size: max(11px, calc(var(--cell) * 0.24)); font-weight: 800; line-height: 1; color: var(--q-line); opacity: 0.75;
+}
+:root[data-theme="dark"] .queen[data-letter]::before { color: #fff; }
 
 /* Peg Jump: a wooden triangle with holes; each row is shifted by half a hole. */
 .board-peg-jump {
@@ -257,9 +271,13 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .peg.is-selected { transform: scale(0.95); box-shadow: 0 0 0 4px var(--accent), 0 6px 10px rgba(0, 0, 0, 0.35); }
 .peg.is-target { transform: scale(0.72); box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.45), 0 0 0 4px var(--accent); }
 .peg.is-hint { outline-offset: 2px; }
+.peg-ghost {
+  position: absolute; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 35% 30%, var(--peg-hi) 0 14%, var(--peg) 45%, color-mix(in srgb, var(--peg) 70%, #000) 100%);
+}
 
 /* A hint glows until the next move. */
-.cell.is-hint { outline: 4px solid var(--accent); outline-offset: -4px; }
+.cell.is-hint { outline: 4px solid var(--accent); outline-offset: -4px; animation: hint-pulse 1s ease-in-out infinite; }
 @keyframes hint-pulse { 50% { outline-color: transparent; } }
 .board.is-finished .cell { cursor: default; }
 
@@ -331,6 +349,13 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .install-steps { margin: 0; padding-left: 22px; line-height: 1.5; }
 .install-steps li { margin: 6px 0; }
 .share-icon { display: inline-block; padding: 0 4px; border: 1.5px solid currentColor; border-radius: 4px; font-size: 0.85em; }
+
+.toggles { display: grid; gap: 2px; background: var(--bg); border-radius: 14px; padding: 4px 12px; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; font-weight: 600; }
+.toggle + .toggle { border-top: 1px solid color-mix(in srgb, var(--muted) 20%, transparent); }
+.toggle small { display: block; font-weight: 400; font-size: 0.82rem; color: var(--muted); }
+.toggle input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
+.toggle input[type="range"] { flex: 0 1 50%; accent-color: var(--accent); }
 
 #update-banner {
   position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 150;

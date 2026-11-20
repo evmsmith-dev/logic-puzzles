@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { LIGHTS_OUT_LEVELS, createLightsOut, isSolved as lightsOff, press, solve } from "../../src/puzzles/lights-out.js";
 import { MINESWEEPER_LEVELS, countMines, createMinesweeper, isCleared, open, solvableWithoutGuessing } from "../../src/puzzles/minesweeper.js";
 import { PEG_LEVELS, allJumps, applyJump, canFinish, createPegJump, fullBoard, goodJump, holeAt, holeCount, legalJumps, pegsLeft, rating, rowCol, startHoles } from "../../src/puzzles/peg-jump.js";
-import { CROSS, QUEEN, QUEENS_LEVELS, clashingQueens, countSolutions, createQueens, isSolved as queensPlaced, nextMark, solveByLogic, touching } from "../../src/puzzles/queens.js";
+import { AUTO_CROSS, CROSS, QUEEN, QUEENS_LEVELS, clash, clashingQueens, countSolutions, createQueens, isSolved as queensPlaced, nextMark, solveByLogic, touching } from "../../src/puzzles/queens.js";
 import { createSlidingTiles, isSolvable, isSolved as tilesInOrder, slide, solveSmall, solvedBoard } from "../../src/puzzles/sliding-tiles.js";
 import { DAILY_PUZZLES, PUZZLES } from "../../src/puzzles/index.js";
 
@@ -192,18 +192,67 @@ test("Queens: queens clash in a row, column, region, or touching at a corner", (
   assert.deepEqual(touching(4, 0).sort((a, b) => a - b), [1, 4, 5]);
 });
 
-test("Queens: a tap cycles empty → ✕ → queen → empty, and the board is won only with every queen right", () => {
-  assert.equal(nextMark(0), CROSS);
-  assert.equal(nextMark(CROSS), QUEEN);
-  assert.equal(nextMark(QUEEN), 0);
+test("Queens: a tap cycles empty → queen → ✕ → empty, and the board is won only with every queen right", () => {
+  assert.equal(nextMark(0), QUEEN);
+  assert.equal(nextMark(QUEEN), CROSS);
+  assert.equal(nextMark(CROSS), 0);
+  assert.equal(nextMark(AUTO_CROSS), QUEEN, "an automatic ✕ acts like an empty square");
   const queens = PUZZLES.find((puzzle) => puzzle.id === "queens");
   let state = queens.create("easy", "win-check");
-  for (const cell of state.answer.slice(0, -1)) state = queens.tap(queens.tap(state, cell).state, cell).state;
+  for (const cell of state.answer.slice(0, -1)) state = queens.tap(state, cell).state;
   assert.ok(!queens.isWon(state));
-  const last = state.answer.at(-1);
-  state = queens.tap(queens.tap(state, last).state, last).state;
+  state = queens.tap(state, state.answer.at(-1)).state;
   assert.ok(queens.isWon(state));
   assert.equal(queens.counter(state)[1], `${state.size}/${state.size}`);
+});
+
+test("Queens: undo takes back taps and whole drags", () => {
+  const queens = PUZZLES.find((puzzle) => puzzle.id === "queens");
+  const start = queens.create("easy", "undo");
+  const one = queens.tap(start, 0).state;
+  const two = queens.tap(one, 0).state; // queen → ✕
+  assert.deepEqual(queens.undo(two).marks, one.marks);
+  assert.deepEqual(queens.undo(queens.undo(two)).marks, start.marks);
+  assert.ok(!queens.canUndo(start));
+  // A drag over three squares is one undo step.
+  let dragged = queens.paintCross(start, 1, { first: true });
+  dragged = queens.paintCross(dragged, 2);
+  dragged = queens.paintCross(dragged, 3);
+  assert.deepEqual([1, 2, 3].map((i) => dragged.marks[i]), [CROSS, CROSS, CROSS]);
+  assert.deepEqual(queens.undo(dragged).marks, start.marks);
+  // Dragging over a queen leaves it alone.
+  assert.equal(queens.paintCross(one, 0), one);
+});
+
+test("Queens: auto-✕ marks what a queen rules out, and clears it again with the queen", () => {
+  const queens = PUZZLES.find((puzzle) => puzzle.id === "queens");
+  const start = queens.create("easy", "auto");
+  const { size, regions } = start;
+  const placed = queens.tap(start, 0, { autoCross: true }).state;
+  for (let i = 1; i < size * size; i++) {
+    const shouldCross = clash(regions, size, 0, i);
+    assert.equal(placed.marks[i], shouldCross ? AUTO_CROSS : 0, `square ${i}`);
+  }
+  // Taking the queen away (queen → ✕) clears its automatic ✕s.
+  const removed = queens.tap(placed, 0, { autoCross: true }).state;
+  assert.ok(!removed.marks.includes(AUTO_CROSS));
+  assert.equal(removed.marks[0], CROSS);
+  // A queen can still go on an automatic ✕ (it then shows as breaking a rule).
+  const onAuto = placed.marks.findIndex((mark) => mark === AUTO_CROSS);
+  assert.equal(queens.tap(placed, onAuto, { autoCross: true }).state.marks[onAuto], QUEEN);
+  // With the setting off, leftover automatic ✕s are cleared on the next tap.
+  assert.ok(!queens.tap(placed, size * size - 1).state.marks.includes(AUTO_CROSS));
+});
+
+test("Queens: hints explain which row, column or region has one place left", () => {
+  const queens = PUZZLES.find((puzzle) => puzzle.id === "queens");
+  for (let i = 0; i < 10; i++) {
+    const state = queens.create("medium", `why-${i}`);
+    const cell = queens.hint(state);
+    const text = queens.hintText(state, cell);
+    assert.match(text, /(row \d|column \d|the \w+ region) has only one place left/);
+    assert.match(queens.hintText(state, cell, { regionLetters: true }), /(row \d|column \d|region [A-H]) has only one place left/);
+  }
 });
 
 test("Queens: hints point out a wrong queen, then a ✕ over a queen, then the next queen to find", () => {
@@ -312,7 +361,10 @@ test("Peg Jump: stuck with pegs left ends the round with a rating, and hints say
   // Two pegs far apart on the 15-hole board: no jumps left.
   const state = { ...pegJump.create("easy", "x"), pegs: (1 << 0) | (1 << 14) };
   assert.ok(pegJump.isLost(state));
-  assert.equal(pegJump.lostResult(state).title, "2 pegs left — Pretty smart");
+  const result = pegJump.lostResult(state);
+  assert.equal(result.title, "Pretty smart — 2 pegs left");
+  assert.equal(result.score, 2, "a ranked finish, with the pegs left as its score");
+  assert.equal(result.haptic, "finish", "a neutral feel, not the losing buzz");
   assert.equal(pegJump.hint(state), null);
   assert.equal(goodJump(5, state.pegs), null);
   assert.match(pegJump.noHintText(state), /Undo/);

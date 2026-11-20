@@ -2,14 +2,19 @@ import { expect } from "@playwright/test";
 
 export const TODAY = "2026-11-03";
 
-/** Opens the app on a fixed date. `help` shows the first-visit How to Play. */
+const ALL_INTROS = { "lights-out": true, "sliding-tiles": true, minesweeper: true, queens: true, "peg-jump": true };
+
+/** Opens the app on a fixed date. `help` acts as a first visit: each puzzle's rules show the first time it's opened. */
 export async function openApp(page, { help = false, storage = {} } = {}) {
-  await page.addInitScript(({ help, storage }) => {
+  await page.addInitScript(({ help, storage, intros }) => {
     if (sessionStorage.getItem("seeded")) return; // only before the first load
     sessionStorage.setItem("seeded", "1");
-    if (!help) localStorage.setItem("logicPuzzles_helpSeen", "true");
+    if (!help) {
+      localStorage.setItem("logicPuzzles_helpSeen", "true");
+      localStorage.setItem("logicPuzzles_introSeen", JSON.stringify(intros));
+    }
     for (const [key, value] of Object.entries(storage)) localStorage.setItem(`logicPuzzles_${key}`, JSON.stringify(value));
-  }, { help, storage });
+  }, { help, storage, intros: ALL_INTROS });
   await page.clock.install({ time: new Date(`${TODAY}T10:00:00`) });
   await page.goto("index.html");
   await expect(page.locator("body.is-ready")).toBeAttached();
