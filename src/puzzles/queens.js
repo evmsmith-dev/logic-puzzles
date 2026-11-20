@@ -1,18 +1,20 @@
 // Queens: the board is split into colored regions. Place one queen in every row, every column
 // and every region, with no two queens touching, not even at a corner.
-// Pure functions. A board is a list of region numbers, row by row; marks are 0 empty, 1 ✕, 2 queen.
+// Pure functions. A board is a list of region numbers, row by row; marks are 0 empty, 1 ✕,
+// 2 queen, 3 an automatic ✕ (placed by the auto-✕ setting, and cleared again with its queen).
 import { randomInt, seededRandom, shuffle } from "../lib/random.js";
 
 export const EMPTY = 0;
 export const CROSS = 1;
 export const QUEEN = 2;
+export const AUTO_CROSS = 3;
 
 // `rules` is the hardest kind of reasoning a puzzle may need (see "Solving like a person"), and
 // `needs` the kind it must need at least once, so Medium and Hard really are harder than Easy.
 export const QUEENS_LEVELS = {
   easy: { size: 6, rules: 1, needs: 1 },
   medium: { size: 7, rules: 2, needs: 2 },
-  hard: { size: 8, rules: 3, needs: 2 },
+  hard: { size: 8, rules: 3, needs: 3 },
 };
 
 const MAX_TRIES = 400;
@@ -64,8 +66,19 @@ export function isSolved(regions, size, marks) {
   return queens === size && clashingQueens(regions, size, marks).size === 0;
 }
 
-/** Tapping a square cycles it: empty → ✕ → queen → empty. */
-export const nextMark = (mark) => (mark + 1) % 3;
+/** Tapping a square cycles it: empty → queen → ✕ → empty. An automatic ✕ acts like empty. */
+export const nextMark = (mark) => ({ [EMPTY]: QUEEN, [QUEEN]: CROSS, [CROSS]: EMPTY, [AUTO_CROSS]: QUEEN })[mark];
+
+/** Redoes the automatic ✕s: every empty square that clashes with a queen gets one. */
+export function withAutoCrosses(regions, size, marks) {
+  const next = marks.map((mark) => (mark === AUTO_CROSS ? EMPTY : mark));
+  const queens = [];
+  next.forEach((mark, i) => { if (mark === QUEEN) queens.push(i); });
+  for (let i = 0; i < next.length; i++) {
+    if (next[i] === EMPTY && queens.some((q) => clash(regions, size, q, i))) next[i] = AUTO_CROSS;
+  }
+  return next;
+}
 
 /** How many answers the board has, stopping at `limit`. */
 export const countSolutions = (regions, size, limit = 2) => findSolutions(regions, size, limit).length;
@@ -122,10 +135,11 @@ function units(regions, size) {
 }
 
 /** Places a queen and rules out every square it clashes with. Returns false on a contradiction. */
-function placeQueen(ctx, open, queens, index) {
+function placeQueen(ctx, open, queens, index, reason = null) {
   if (!open[index]) return false;
   queens[index] = true;
   ctx.order?.push(index);
+  if (ctx.reasons && reason) ctx.reasons[index] = reason;
   for (let i = 0; i < open.length; i++) if (i !== index && clash(ctx.regions, ctx.size, index, i)) open[i] = false;
   return true;
 }
@@ -137,12 +151,13 @@ function basicSteps(ctx, open, queens) {
   let changed = true;
   while (changed) {
     changed = false;
-    for (const unit of ctx.all) {
+    for (const [n, unit] of ctx.all.entries()) {
       if (hasQueen(unit, queens)) continue;
       const left = unit.filter((i) => open[i]);
       if (!left.length) return false;
       if (left.length === 1) {
-        placeQueen(ctx, open, queens, left[0]);
+        const kind = ["row", "column", "region"][Math.floor(n / ctx.size)];
+        placeQueen(ctx, open, queens, left[0], { kind, which: n % ctx.size });
         changed = true;
         continue;
       }
@@ -213,7 +228,7 @@ function* subsets(items, maxSize) {
 
 /** Rule 3: rules out one square whose queen would leave a row, column or region empty. */
 function whatIfStep(ctx, open, queens) {
-  const trial = { ...ctx, order: null }; // trial queens aren't part of the answer
+  const trial = { ...ctx, order: null, reasons: null }; // trial queens aren't part of the answer
   for (let i = 0; i < open.length; i++) {
     if (!open[i] || queens[i]) continue;
     const tryOpen = open.slice();
@@ -228,20 +243,23 @@ function whatIfStep(ctx, open, queens) {
 }
 
 /**
- * Solves the board step by step with rules up to `maxRule`. Returns { solved, hardest, order },
- * where `hardest` is the highest rule the solve needed and `order` lists the queens in the
- * order they were found (used for hints).
+ * Solves the board step by step with rules up to `maxRule`. Returns { solved, hardest, order,
+ * reasons }: `hardest` is the highest rule the solve needed, `order` lists the queens in the
+ * order they were found, and `reasons[cell]` says which row, column or region had only that
+ * square left ({ kind, which }). Hints use the last two.
  */
 export function solveByLogic(regions, size, maxRule = 3) {
   const ctx = { regions, size, ...units(regions, size) };
   const open = new Array(size * size).fill(true);
   const queens = new Array(size * size).fill(false);
   const order = [];
+  const reasons = {};
   ctx.order = order;
+  ctx.reasons = reasons;
   let hardest = 1;
   for (;;) {
-    if (!basicSteps(ctx, open, queens)) return { solved: false, hardest, order };
-    if (order.length === size) return { solved: true, hardest, order };
+    if (!basicSteps(ctx, open, queens)) return { solved: false, hardest, order, reasons };
+    if (order.length === size) return { solved: true, hardest, order, reasons };
     if (maxRule >= 2 && groupStep(ctx, open, queens)) {
       hardest = Math.max(hardest, 2);
       continue;
@@ -250,7 +268,7 @@ export function solveByLogic(regions, size, maxRule = 3) {
       hardest = 3;
       continue;
     }
-    return { solved: false, hardest, order };
+    return { solved: false, hardest, order, reasons };
   }
 }
 

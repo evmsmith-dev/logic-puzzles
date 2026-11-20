@@ -1,10 +1,13 @@
 // Logic Puzzles: Home, the game screen, pop-ups and saving. The puzzles themselves are in
 // src/puzzles (pure logic); this file wires them to the page.
 import { DAILY_LEVEL, DAILY_PUZZLES, LEVELS, LEVEL_NAMES, PUZZLES, puzzleById } from "./puzzles/index.js";
-import { dailyStreak, dayComplete, formatTime, recordDaily, recordSolve } from "./lib/progress.js";
+import { FREEZE_EVERY, MAX_FREEZES, dailyStreak, dayComplete, formatTime, recordDaily, recordScore, recordSolve, streakInfo } from "./lib/progress.js";
 import { dateKey, newSeed } from "./lib/random.js";
 import { KEYS, readJson, writeJson } from "./storage.js";
-import { fitBoard, renderBoard } from "./ui/board.js";
+import { getSettings, onSettingsChange, setting, updateSettings } from "./lib/settings.js";
+import { audioSettingsChanged, play, setMood, unlockAudio } from "./ui/audio.js";
+import { animateMove, fitBoard, renderBoard } from "./ui/board.js";
+import { buzz, hapticsAvailable } from "./ui/haptics.js";
 import { backToHome, closeTop, enterGame, initOverlays, isOpen, openOverlay } from "./ui/overlays.js";
 import { initInstall } from "./ui/install.js";
 import { registerServiceWorker } from "./ui/update.js";
@@ -19,6 +22,7 @@ const app = {
   daily: readJson(KEYS.daily, {}),
   levels: readJson("levels", {}), // last level chosen per puzzle
   firstSeen: readJson("firstSeen", {}), // the day a puzzle added in an update first appeared here
+  introSeen: readJson("introSeen", null), // puzzles whose rules have been shown once
   game: null, // { puzzleId, level, seed, daily, state, moves, elapsed, hinted, finished }
   flagMode: false,
   hint: null,
@@ -70,16 +74,20 @@ function renderHome() {
       <span class="daily-result">${result ? `✓ ${formatTime(result.time)}` : "Play"}</span>
     </button>`;
   }).join("");
-  const streak = dailyStreak(app.daily, today, dailyIds);
-  byId("daily-streak").textContent = streak ? `🔥 ${streak}-day streak` : `Finish all ${inWords(DAILY_PUZZLES.length)} to start a streak`;
+  const { streak, freezes } = streakInfo(app.daily, today, dailyIds);
+  byId("daily-streak").textContent = streak
+    ? `🔥 ${streak}-day streak${freezes ? ` · 🧊 ${freezes} freeze${freezes > 1 ? "s" : ""}` : ""}`
+    : `Finish all ${inWords(DAILY_PUZZLES.length)} to start a streak`;
   byId("daily-share-btn").hidden = !dayComplete(app.daily, today, dailyIds);
 
   byId("puzzle-list").innerHTML = PUZZLES.map((puzzle) => {
     const level = app.levels[puzzle.id] || "easy";
     const best = app.stats[puzzle.id]?.[level];
-    const bestText = best?.bestTime != null
+    let bestText = best?.bestTime != null
       ? `Best ${formatTime(best.bestTime)} · ${best.solved} solved`
       : best?.solved ? `${best.solved} solved` : "Not solved yet";
+    // Peg Jump: before a one-peg finish, show the best finish so far.
+    if (!best?.solved && best?.bestScore != null) bestText = `Best finish: ${best.bestScore} pegs`;
     return `<article class="puzzle-card" data-puzzle="${puzzle.id}">
       <div class="puzzle-card-head">
         <span class="puzzle-emoji" aria-hidden="true">${puzzle.emoji}</span>
@@ -156,7 +164,7 @@ function updateStatus() {
 
 function drawBoard() {
   const { game } = app;
-  renderBoard(byId("board"), game.puzzleId, game.state, { hint: app.hint, finished: game.finished });
+  renderBoard(byId("board"), game.puzzleId, game.state, { hint: app.hint, finished: game.finished, regionLetters: setting("regionLetters") });
   fitBoard(byId("board-area"), byId("board"), game.puzzleId, game.state);
   updateStatus();
 }
@@ -177,7 +185,18 @@ function showGame() {
   app.hint = null;
   window.scrollTo(0, 0);
   drawBoard();
+  setMood(game.puzzleId);
   startClock();
+}
+
+/** The first time a puzzle is opened, shows its rules; the clock waits until they're closed. */
+function showIntroOnce() {
+  const { puzzleId } = app.game;
+  if (app.introSeen?.[puzzleId]) return;
+  app.introSeen = { ...app.introSeen, [puzzleId]: true };
+  writeJson("introSeen", app.introSeen);
+  stopClock();
+  showHelp(puzzleId, { onClose: () => startClock() });
 }
 
 /** Starts a puzzle. `daily` is today's date key for the daily puzzle. */
@@ -192,12 +211,15 @@ function startGame(puzzleId, level, { daily = null, resume = null } = {}) {
   const wasOnGame = !byId("game").hidden;
   showGame();
   if (!wasOnGame) enterGame(leaveGame);
+  showIntroOnce(); // after enterGame, so closing the rules returns to the game
   saveGame();
 }
 
 function leaveGame() {
   stopClock();
   saveGame();
+  hideHintToast();
+  setMood(null);
   app.game = null;
   byId("game").hidden = true;
   byId("home").hidden = false;
@@ -217,6 +239,7 @@ function afterMove(moved) {
   const puzzle = puzzleById(game.puzzleId);
   game.moves += moved;
   app.hint = null;
+  hideHintToast();
   if (puzzle.isWon(game.state)) finishGame(true);
   else if (puzzle.isLost?.(game.state)) finishGame(false);
   else {
@@ -230,11 +253,18 @@ function tap(index) {
   if (!game || game.finished) return;
   const puzzle = puzzleById(game.puzzleId);
   const before = game.state;
-  const { state, moved } = puzzle.tap(game.state, index, { flagMode: app.flagMode });
+  const { state, moved } = puzzle.tap(game.state, index, { flagMode: app.flagMode, autoCross: setting("autoCross") });
   if (state === before) return;
   game.state = state;
-  vibrate(10);
+  feedback(puzzle.feel?.(before, state, index) ?? { haptic: "tap" });
   afterMove(moved);
+  animateMove(byId("board"), game.puzzleId, before, state);
+}
+
+/** Plays a move's sound and vibration: { sound, haptic, detail }. */
+function feedback({ sound = null, haptic = null, detail = {} }) {
+  if (sound) play(sound, detail);
+  if (haptic) buzz(haptic);
 }
 
 function flagSquare(index) {
@@ -243,7 +273,7 @@ function flagSquare(index) {
   const next = puzzleById("minesweeper").flag(game.state, index);
   if (next === game.state) return;
   game.state = next;
-  vibrate(25);
+  feedback({ sound: "flag", haptic: "flag" });
   afterMove(0);
 }
 
@@ -256,6 +286,8 @@ function undoMove() {
   game.moves = Math.max(0, game.moves - 1);
   game.finished = false;
   app.hint = null;
+  hideHintToast();
+  play("undo");
   drawBoard();
   startClock();
   saveGame();
@@ -274,7 +306,9 @@ function showHint() {
   app.hint = index;
   drawBoard();
   saveGame();
-  toast(puzzleById(game.puzzleId).hintText?.(game.state, index) ?? "Try tapping the glowing square.");
+  play("hint");
+  // The hint stays up until the next move, so there's time to read it.
+  toast(puzzle.hintText?.(game.state, index, { regionLetters: setting("regionLetters") }) ?? "Try tapping the glowing square.", { untilMove: true });
 }
 
 function finishGame(won) {
@@ -286,12 +320,22 @@ function finishGame(won) {
   writeJson(KEYS.current, null);
   const puzzle = puzzleById(game.puzzleId);
   if (!won) {
-    vibrate([60, 40, 60]);
-    const { emoji, title, text, undo } = puzzle.lostResult(game.state);
+    const { emoji, title, text, undo, score, scoreName, sound, haptic } = puzzle.lostResult(game.state);
+    feedback({ sound, haptic });
+    let note = text;
+    if (score != null) {
+      // A ranked finish (Peg Jump with pegs left): keep the best one.
+      const previous = app.stats[game.puzzleId]?.[game.level]?.bestScore;
+      let newBest;
+      ({ stats: app.stats, newBest } = recordScore(app.stats, game.puzzleId, game.level, score));
+      writeJson(KEYS.stats, app.stats);
+      note = `${newBest && previous != null ? "Your best finish yet! " : ""}${text}`;
+      if (!newBest) note += ` Your best: ${scoreName(previous)}.`;
+    }
     showResult({
       emoji,
       title,
-      text,
+      text: note,
       stats: [],
       primary: undo ? ["↶ Undo", () => undoMove()] : ["Try again", () => restartGame()],
       secondary: undo
@@ -308,14 +352,19 @@ function finishGame(won) {
   }
   ({ stats: app.stats, newBest } = recordSolve(app.stats, game.puzzleId, game.level, result));
   writeJson(KEYS.stats, app.stats);
+  if (puzzle.scored) {
+    // A one-peg finish is the best possible score.
+    ({ stats: app.stats } = recordScore(app.stats, game.puzzleId, game.level, 1));
+    writeJson(KEYS.stats, app.stats);
+  }
   celebrate();
-  vibrate([30, 30, 60]);
+  feedback({ sound: "win", haptic: "win" });
   const stats = [
-    ["Time", formatTime(time) + (newBest.time ? " 🏅" : "")],
+    setting("relaxed") ? null : ["Time", formatTime(time) + (newBest.time ? " 🏅" : "")],
     puzzle.showMoves === false ? null : ["Moves", String(game.moves) + (newBest.moves ? " 🏅" : "")],
     game.state.par ? ["Fewest possible", String(game.state.par)] : null,
   ].filter(Boolean);
-  const bestNote = newBest.time ? "A new best time!" : game.hinted ? "Solved with a hint — hints don't count toward your best time." : "";
+  const bestNote = newBest.time && !setting("relaxed") ? "A new best time!" : game.hinted ? "Solved with a hint — hints don't count toward your best time." : "";
   const today = dateKey();
   const remaining = DAILY_PUZZLES.filter((p) => !app.daily[today]?.[p.id]);
   let text = [puzzle.winText?.(game.state), bestNote].filter(Boolean).join(" ");
@@ -404,7 +453,7 @@ function listNames(puzzles) {
   return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names.join("");
 }
 
-function showHelp(puzzleId = null) {
+function showHelp(puzzleId = null, { onClose = null } = {}) {
   const list = puzzleId ? [puzzleById(puzzleId)] : PUZZLES;
   byId("help-title").textContent = puzzleId ? `How to play ${list[0].name}` : "How to play";
   byId("help-body").innerHTML = list.map((puzzle) => `
@@ -417,16 +466,39 @@ function showHelp(puzzleId = null) {
       <ul>
         <li>Every day there's one ${LEVEL_NAMES[DAILY_LEVEL]} ${listNames(DAILY_PUZZLES)} puzzle — the same for everyone.</li>
         <li>Finish all ${inWords(DAILY_PUZZLES.length)} to keep your streak going. New puzzles arrive at midnight.</li>
+        <li>🧊 Every ${FREEZE_EVERY} days in a row earns a freeze (you can hold ${MAX_FREEZES}). If you miss a day, a freeze saves your streak.</li>
         <li>💡 Hints are there if you're stuck, but a puzzle solved with a hint doesn't set a best time.</li>
       </ul>
     </section>`);
-  openOverlay("help-overlay");
+  openOverlay("help-overlay", onClose ? { onClose } : undefined);
 }
+
+// Setting switches: element id → setting name.
+const SWITCHES = {
+  "set-sound": "sound",
+  "set-music": "music",
+  "set-vibration": "vibration",
+  "set-relaxed": "relaxed",
+  "set-auto-cross": "autoCross",
+  "set-region-letters": "regionLetters",
+  "set-large-text": "largeText",
+};
 
 function showSettings() {
   const current = readJson(KEYS.theme, "auto");
   document.querySelectorAll(".theme-btn").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.themeValue === current)));
+  const settings = getSettings();
+  for (const [id, name] of Object.entries(SWITCHES)) byId(id).checked = settings[name];
+  byId("set-music-volume").value = Math.round(settings.musicVolume * 100);
+  byId("music-volume-row").hidden = !settings.music;
+  byId("vibration-row").hidden = !hapticsAvailable();
   openOverlay("settings-overlay");
+}
+
+/** Settings that change the page itself. */
+function applySettings(settings) {
+  document.documentElement.classList.toggle("large-text", settings.largeText);
+  document.documentElement.classList.toggle("relaxed", settings.relaxed);
 }
 
 function applyTheme(preference) {
@@ -437,20 +509,22 @@ function applyTheme(preference) {
 // ---------- Small helpers ----------
 
 let toastHandle = null;
-function toast(message) {
+let toastUntilMove = false;
+
+/** Shows a short message. With `untilMove`, it stays until the next move instead of fading. */
+function toast(message, { untilMove = false } = {}) {
   const el = byId("toast");
   el.textContent = message;
   el.classList.add("is-visible");
   clearTimeout(toastHandle);
-  toastHandle = setTimeout(() => el.classList.remove("is-visible"), 2200);
+  toastUntilMove = untilMove;
+  if (!untilMove) toastHandle = setTimeout(() => el.classList.remove("is-visible"), 2200);
 }
 
-function vibrate(pattern) {
-  try {
-    navigator.vibrate?.(pattern);
-  } catch {
-    // Not supported.
-  }
+function hideHintToast() {
+  if (!toastUntilMove) return;
+  toastUntilMove = false;
+  byId("toast").classList.remove("is-visible");
 }
 
 function celebrate() {
@@ -465,7 +539,14 @@ async function shareDaily() {
     return `${puzzle.emoji} ${result ? formatTime(result.time) : "—"}${result?.hinted ? " (hint)" : ""}`;
   });
   const streak = dailyStreak(app.daily, today, dailyIds);
-  const text = [`Logic Puzzles daily 🧩 ${shortDate(today)}`, ...lines, streak > 1 ? `🔥 ${streak}-day streak` : ""].filter(Boolean).join("\n");
+  const url = new URL(".", location.href).href; // the app's address, without index.html
+  const text = [
+    `Logic Puzzles daily 🧩 ${shortDate(today)}`,
+    ...lines,
+    ...(streak > 1 ? [`🔥 ${streak}-day streak`] : []),
+    "",
+    `Can you beat my times? Play free: ${url}`,
+  ].join("\n");
   try {
     if (navigator.share) await navigator.share({ text });
     else {
@@ -483,9 +564,46 @@ function wireBoard() {
   const board = byId("board");
   let pressTimer = null;
   let longPressed = false;
+  let drag = null; // Queens: { pointerId, start, active, saved, painted }
+  let dragged = false;
+
+  // Queens: dragging across squares marks them ✕. The whole drag is one undo step.
+  const paint = (index) => {
+    const queens = puzzleById("queens");
+    drag.painted.add(index);
+    const next = queens.paintCross(app.game.state, index, { first: !drag.saved });
+    if (next === app.game.state) return;
+    if (!drag.saved) app.game.moves += 1;
+    drag.saved = true;
+    app.game.state = next;
+    feedback({ sound: "cross", haptic: "tap" });
+    app.hint = null;
+    hideHintToast();
+    drawBoard();
+    saveGame();
+  };
+  board.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.pointerId || !app.game || app.game.finished) return;
+    const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest?.("#board [data-index]");
+    if (!cell) return;
+    const index = Number(cell.dataset.index);
+    if (!drag.active) {
+      if (index === drag.start) return;
+      drag.active = true;
+      dragged = true;
+      paint(drag.start);
+    }
+    if (!drag.painted.has(index)) paint(index);
+  });
+  const endDrag = () => { drag = null; };
+
   board.addEventListener("pointerdown", (event) => {
     const cell = event.target.closest("[data-index]");
     longPressed = false;
+    dragged = false;
+    if (cell && app.game?.puzzleId === "queens" && !app.game.finished) {
+      drag = { pointerId: event.pointerId, start: Number(cell.dataset.index), active: false, saved: false, painted: new Set() };
+    }
     if (!cell || app.game?.puzzleId !== "minesweeper") return;
     clearTimeout(pressTimer);
     pressTimer = setTimeout(() => {
@@ -494,9 +612,9 @@ function wireBoard() {
     }, LONG_PRESS_MS);
   });
   const cancel = () => clearTimeout(pressTimer);
-  board.addEventListener("pointerup", cancel);
+  board.addEventListener("pointerup", () => { cancel(); endDrag(); });
   board.addEventListener("pointerleave", cancel);
-  board.addEventListener("pointercancel", cancel);
+  board.addEventListener("pointercancel", () => { cancel(); endDrag(); });
   board.addEventListener("contextmenu", (event) => {
     // Right-click flags on a computer; on phones, stop the long-press menu.
     event.preventDefault();
@@ -506,18 +624,54 @@ function wireBoard() {
   board.addEventListener("click", (event) => {
     const cell = event.target.closest("[data-index]");
     if (!cell) return;
-    if (longPressed) {
+    if (longPressed || dragged) {
+      // The long press already flagged, or the drag already marked.
       longPressed = false;
+      dragged = false;
       return;
     }
     tap(Number(cell.dataset.index));
   });
 }
 
+/**
+ * Players from before per-puzzle intros saw every puzzle's rules on their first visit, so don't
+ * show intros for puzzles they've already played.
+ */
+function noteSeenIntros() {
+  if (app.introSeen) return;
+  const played = new Set(Object.keys(app.stats));
+  for (const day of Object.values(app.daily)) for (const id of Object.keys(day)) played.add(id);
+  const saved = readJson(KEYS.current, null);
+  if (saved) played.add(saved.puzzleId);
+  app.introSeen = readJson(KEYS.helpSeen, false) ? Object.fromEntries([...played].map((id) => [id, true])) : {};
+  writeJson("introSeen", app.introSeen);
+}
+
+function wireSettings() {
+  for (const [id, name] of Object.entries(SWITCHES)) {
+    byId(id).addEventListener("change", (event) => updateSettings({ [name]: event.target.checked }));
+  }
+  byId("set-music-volume").addEventListener("input", (event) => updateSettings({ musicVolume: Number(event.target.value) / 100 }));
+  onSettingsChange((settings, changes) => {
+    applySettings(settings);
+    byId("music-volume-row").hidden = !settings.music;
+    if ("sound" in changes || "music" in changes || "musicVolume" in changes) audioSettingsChanged();
+    if ("vibration" in changes && settings.vibration) buzz("tap");
+    if (app.game && ("regionLetters" in changes || "relaxed" in changes)) drawBoard();
+  });
+  applySettings(getSettings());
+  // Browsers only allow sound after a tap.
+  document.addEventListener("pointerdown", unlockAudio, { passive: true });
+  document.addEventListener("keydown", unlockAudio, { passive: true });
+}
+
 function init() {
   noteNewPuzzles();
+  noteSeenIntros();
   initOverlays();
   wireBoard();
+  wireSettings();
 
   byId("puzzle-list").addEventListener("click", (event) => {
     const levelBtn = event.target.closest("[data-level]");
@@ -595,10 +749,7 @@ function init() {
 
   renderHome();
   document.body.classList.add("is-ready");
-  if (!readJson(KEYS.helpSeen, false)) {
-    writeJson(KEYS.helpSeen, true);
-    showHelp();
-  }
+  writeJson(KEYS.helpSeen, true); // each puzzle's rules now show the first time it's opened
   initInstall();
   registerServiceWorker();
 }

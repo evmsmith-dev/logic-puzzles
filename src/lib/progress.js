@@ -38,19 +38,46 @@ export function dayComplete(daily, day, puzzleIds) {
   return ids.every((id) => daily[day]?.[id]);
 }
 
-/**
- * Days in a row with every daily puzzle done. Today counts once it's complete; until then the
- * streak from yesterday still stands.
- */
-export function dailyStreak(daily, today, puzzleIds) {
-  let day = dayComplete(daily, today, puzzleIds) ? today : addDays(today, -1);
-  let streak = 0;
-  while (dayComplete(daily, day, puzzleIds)) {
-    streak++;
-    day = addDays(day, -1);
-  }
-  return streak;
+/** Records the best score of a puzzle that ends with a score (fewer is better). */
+export function recordScore(stats, puzzleId, level, score) {
+  const next = structuredCloneSafe(stats);
+  const entry = next[puzzleId]?.[level] || { solved: 0, bestTime: null, bestMoves: null };
+  const newBest = entry.bestScore == null || score < entry.bestScore;
+  if (newBest) entry.bestScore = score;
+  next[puzzleId] = { ...next[puzzleId], [level]: entry };
+  return { stats: next, newBest };
 }
+
+// Every 7 days in a row earns a freeze (up to 2), which saves the streak on a missed day.
+export const FREEZE_EVERY = 7;
+export const MAX_FREEZES = 2;
+
+/**
+ * The daily streak: { streak, freezes }. `streak` counts days with every daily puzzle done; a
+ * missed day uses up a freeze instead of ending it, if there is one. Today counts once it's
+ * complete; until then the streak from yesterday still stands.
+ */
+export function streakInfo(daily, today, puzzleIds) {
+  const first = Object.keys(daily).filter((day) => day <= today).sort()[0];
+  let streak = 0;
+  let freezes = 0;
+  const finished = () => {
+    streak++;
+    if (streak % FREEZE_EVERY === 0) freezes = Math.min(MAX_FREEZES, freezes + 1);
+  };
+  for (let day = first; day && day < today; day = addDays(day, 1)) {
+    if (dayComplete(daily, day, puzzleIds)) finished();
+    else if (streak > 0 && freezes > 0) freezes--;
+    else {
+      streak = 0;
+      freezes = 0;
+    }
+  }
+  if (first && dayComplete(daily, today, puzzleIds)) finished();
+  return { streak, freezes };
+}
+
+export const dailyStreak = (daily, today, puzzleIds) => streakInfo(daily, today, puzzleIds).streak;
 
 /** "1:05" or "12:30" or "1:02:03". */
 export function formatTime(ms) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { dailyStreak, formatTime, recordDaily, recordSolve } from "../../src/lib/progress.js";
+import { dailyStreak, formatTime, recordDaily, recordScore, recordSolve, streakInfo } from "../../src/lib/progress.js";
 import { addDays, dateKey, seededRandom } from "../../src/lib/random.js";
 
 const IDS = ["a", "b", "c"];
@@ -66,4 +66,44 @@ test("seeded randomness repeats exactly", () => {
   const a = seededRandom("x");
   const b = seededRandom("x");
   for (let i = 0; i < 5; i++) assert.equal(a(), b());
+});
+
+/** The days from `start` for `count` days. */
+const run = (start, count) => Array.from({ length: count }, (_, i) => addDays(start, i));
+
+test("a missed day ends a short streak", () => {
+  const today = "2026-11-20";
+  const daily = allDone([...run("2026-11-14", 4), "2026-11-19"]); // 14–17, missed 18, 19
+  assert.deepEqual(streakInfo(daily, today, IDS), { streak: 1, freezes: 0 });
+});
+
+test("every 7 days in a row earns a freeze that saves the streak on a missed day", () => {
+  const today = "2026-11-20";
+  // 7 days (Nov 10–16) earn a freeze; Nov 17 is missed; Nov 18–19 done.
+  const daily = allDone([...run("2026-11-10", 7), "2026-11-18", "2026-11-19"]);
+  assert.deepEqual(streakInfo(daily, today, IDS), { streak: 9, freezes: 0 });
+  // Two missed days in a row with one freeze: the second ends it.
+  const twoMissed = allDone([...run("2026-11-08", 7), "2026-11-17", "2026-11-18", "2026-11-19"]);
+  assert.equal(dailyStreak(twoMissed, today, IDS), 3);
+});
+
+test("freezes add up to two, and today's unfinished set never uses one", () => {
+  const today = "2026-11-30";
+  const daily = allDone(run("2026-11-01", 29)); // Nov 1–29: 29 days, freezes at 7, 14, 21, 28
+  assert.deepEqual(streakInfo(daily, today, IDS), { streak: 29, freezes: 2 });
+  const withToday = { ...daily, ...allDone([today]) };
+  assert.equal(streakInfo(withToday, today, IDS).streak, 30);
+});
+
+test("best scores keep the lowest", () => {
+  let stats = {};
+  let newBest;
+  ({ stats, newBest } = recordScore(stats, "peg-jump", "easy", 3));
+  assert.ok(newBest);
+  ({ stats, newBest } = recordScore(stats, "peg-jump", "easy", 4));
+  assert.ok(!newBest);
+  ({ stats, newBest } = recordScore(stats, "peg-jump", "easy", 2));
+  assert.ok(newBest);
+  assert.equal(stats["peg-jump"].easy.bestScore, 2);
+  assert.equal(stats["peg-jump"].easy.solved, 0, "a ranked finish isn't a solve");
 });
