@@ -8,7 +8,7 @@ import { getSettings, onSettingsChange, setting, updateSettings } from "./lib/se
 import { audioSettingsChanged, play, setMood, unlockAudio } from "./ui/audio.js";
 import { animateMove, fitBoard, renderBoard } from "./ui/board.js";
 import { buzz, hapticsAvailable } from "./ui/haptics.js";
-import { backToHome, closeTop, enterGame, initOverlays, isOpen, openOverlay } from "./ui/overlays.js";
+import { anyOpen, backToHome, closeTop, enterGame, initOverlays, openOverlay } from "./ui/overlays.js";
 import { initInstall } from "./ui/install.js";
 import { registerServiceWorker } from "./ui/update.js";
 
@@ -183,6 +183,7 @@ function showGame() {
   byId("undo-btn").hidden = !puzzle.undo;
   byId("new-btn").hidden = Boolean(game.daily); // the daily puzzle is fixed for the day
   app.hint = null;
+  hideHintToast();
   window.scrollTo(0, 0);
   drawBoard();
   setMood(game.puzzleId);
@@ -256,6 +257,7 @@ function tap(index) {
   const { state, moved } = puzzle.tap(game.state, index, { flagMode: app.flagMode, autoCross: setting("autoCross") });
   if (state === before) return;
   game.state = state;
+  // The move's sound first, so a win's chime and feel come after it. (feedback never throws.)
   feedback(puzzle.feel?.(before, state, index) ?? { haptic: "tap" });
   afterMove(moved);
   animateMove(byId("board"), game.puzzleId, before, state);
@@ -263,8 +265,12 @@ function tap(index) {
 
 /** Plays a move's sound and vibration: { sound, haptic, detail }. */
 function feedback({ sound = null, haptic = null, detail = {} }) {
-  if (sound) play(sound, detail);
-  if (haptic) buzz(haptic);
+  try {
+    if (sound) play(sound, detail);
+    if (haptic) buzz(haptic);
+  } catch {
+    // Sound and vibration are extras; a failure must never stop the game.
+  }
 }
 
 function flagSquare(index) {
@@ -394,6 +400,7 @@ function restartGame() {
   stopClock();
   Object.assign(game, { state: puzzle.restart(game.state), moves: 0, finished: false, elapsed: keep });
   app.hint = null;
+  hideHintToast();
   drawBoard();
   startClock();
   saveGame();
@@ -584,6 +591,10 @@ function wireBoard() {
   };
   board.addEventListener("pointermove", (event) => {
     if (!drag || event.pointerId !== drag.pointerId || !app.game || app.game.finished) return;
+    if (event.pointerType === "mouse" && event.buttons === 0) {
+      endDrag(); // the button was let go outside the board
+      return;
+    }
     const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest?.("#board [data-index]");
     if (!cell) return;
     const index = Number(cell.dataset.index);
@@ -596,6 +607,9 @@ function wireBoard() {
     if (!drag.painted.has(index)) paint(index);
   });
   const endDrag = () => { drag = null; };
+  // A drag can end anywhere, even off the board.
+  addEventListener("pointerup", endDrag);
+  addEventListener("pointercancel", endDrag);
 
   board.addEventListener("pointerdown", (event) => {
     const cell = event.target.closest("[data-index]");
@@ -661,9 +675,11 @@ function wireSettings() {
     if (app.game && ("regionLetters" in changes || "relaxed" in changes)) drawBoard();
   });
   applySettings(getSettings());
-  // Browsers only allow sound after a tap.
-  document.addEventListener("pointerdown", unlockAudio, { passive: true });
-  document.addEventListener("keydown", unlockAudio, { passive: true });
+  // Browsers only allow sound after a tap. iPhones count only the end of a tap (or a click),
+  // so listen for those too; unlockAudio is cheap once audio is running.
+  for (const type of ["pointerdown", "pointerup", "touchend", "click", "keydown"]) {
+    document.addEventListener(type, unlockAudio, { passive: true, capture: true });
+  }
 }
 
 function init() {
@@ -740,7 +756,7 @@ function init() {
     if (document.visibilityState === "hidden") {
       stopClock();
       saveGame();
-    } else if (!isOpen("result-overlay")) startClock();
+    } else if (!anyOpen()) startClock(); // pop-ups (rules, results) restart it when they close
   });
   addEventListener("pagehide", () => saveGame());
   addEventListener("resize", () => {

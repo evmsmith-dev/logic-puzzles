@@ -21,8 +21,9 @@ test("only the first finish of a daily puzzle counts, and old days are dropped",
   let daily = recordDaily({}, "2026-11-03", "a", { time: 100 });
   daily = recordDaily(daily, "2026-11-03", "a", { time: 50 });
   assert.equal(daily["2026-11-03"].a.time, 100);
-  daily = recordDaily({ "2026-08-01": { a: { time: 1 } } }, "2026-11-03", "b", { time: 1 });
-  assert.equal(daily["2026-08-01"], undefined);
+  daily = recordDaily({ "2024-08-01": { a: { time: 1 } }, "2025-08-01": { a: { time: 1 } } }, "2026-11-03", "b", { time: 1 });
+  assert.equal(daily["2024-08-01"], undefined, "more than two years old");
+  assert.ok(daily["2025-08-01"]);
 });
 
 test("the streak counts days with every puzzle done, and today's unfinished set doesn't break it", () => {
@@ -106,4 +107,15 @@ test("best scores keep the lowest", () => {
   assert.ok(newBest);
   assert.equal(stats["peg-jump"].easy.bestScore, 2);
   assert.equal(stats["peg-jump"].easy.solved, 0, "a ranked finish isn't a solve");
+});
+
+test("a long streak with a freeze survives two months of history", () => {
+  // Every day from Jan 1 to Mar 31 done except Jan 9 (covered by the freeze from Jan 1–7).
+  let daily = {};
+  for (const day of run("2026-01-01", 90)) {
+    if (day !== "2026-01-09") daily = recordDaily(daily, day, "a", { time: 1 });
+  }
+  const ids = ["a"];
+  assert.equal(streakInfo(daily, "2026-03-31", ids).streak, 89);
+  assert.ok("2026-01-01" in daily, "history isn't cut at two months");
 });

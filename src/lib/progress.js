@@ -2,7 +2,9 @@
 // Pure functions over plain objects; src/storage.js reads and writes them.
 import { addDays } from "./random.js";
 
-export const DAILY_KEEP_DAYS = 60;
+// Daily results are kept for two years. The streak is counted from this history, and freezes
+// make long streaks common, so a short history would cut streaks off (and lose freezes).
+export const DAILY_KEEP_DAYS = 730;
 
 /** Records a finished puzzle. Returns { stats, newBest } where newBest says what improved. */
 export function recordSolve(stats, puzzleId, level, { time, moves, hinted }) {
@@ -23,7 +25,7 @@ export function recordSolve(stats, puzzleId, level, { time, moves, hinted }) {
 export function recordDaily(daily, day, puzzleId, result) {
   if (daily[day]?.[puzzleId]) return daily;
   const next = { ...daily, [day]: { ...daily[day], [puzzleId]: result } };
-  // Keep the last two months.
+  // Keep the last two years.
   const oldest = addDays(day, -DAILY_KEEP_DAYS);
   for (const key of Object.keys(next)) if (key < oldest) delete next[key];
   return next;

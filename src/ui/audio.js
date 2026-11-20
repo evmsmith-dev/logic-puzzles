@@ -9,19 +9,25 @@ let master = null;
 let sfxBus = null;
 let musicBus = null;
 let noiseBuffer = null;
+let unavailable = false; // Web Audio missing or failed: stop trying
 
 const now = () => ctx.currentTime;
 
 function setUp() {
   if (ctx) return true;
   const Context = window.AudioContext || window.webkitAudioContext;
-  if (!Context) return false;
+  if (!Context || unavailable) return false;
   try {
     if (navigator.audioSession) navigator.audioSession.type = "ambient";
   } catch {
     // Older Safari.
   }
-  ctx = new Context();
+  try {
+    ctx = new Context();
+  } catch {
+    unavailable = true;
+    return false;
+  }
   master = ctx.createGain();
   master.connect(ctx.destination);
   sfxBus = ctx.createGain();
@@ -129,10 +135,14 @@ const SOUNDS = {
 
 /** Plays a sound effect by name, if sound effects are on. */
 export function play(name, detail = {}) {
-  if (!setting("sound") || !SOUNDS[name]) return;
-  if (!setUp() || ctx.state !== "running") return;
-  SOUNDS[name](detail);
-  if (name === "win" || name === "finish") duckMusic();
+  if (!setting("sound") || !SOUNDS[name] || !setUp()) return;
+  const sound = () => {
+    SOUNDS[name](detail);
+    if (name === "win" || name === "finish") duckMusic();
+  };
+  // The first sound can arrive while audio is still waking up: play it once it's ready.
+  if (ctx.state === "running") sound();
+  else if (document.visibilityState === "visible") ctx.resume().then(sound, () => {});
 }
 
 // ---------- Music ----------

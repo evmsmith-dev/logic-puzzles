@@ -180,6 +180,50 @@ test("Queens: dragging marks ✕ on every square passed, and one undo takes the 
   for (const i of [0, 1, 2, 3]) await expect(page.locator(`#board [data-index="${i}"]`)).toHaveText("");
 });
 
+test("Queens: letting go of the mouse off the board ends the drag", async ({ page }) => {
+  await h.openApp(page);
+  await h.play(page, "queens", "easy");
+  const center = async (i) => {
+    const box = await page.locator(`#board [data-index="${i}"]`).boundingBox();
+    return [box.x + box.width / 2, box.y + box.height / 2];
+  };
+  await page.mouse.move(...(await center(0)));
+  await page.mouse.down();
+  await page.mouse.move(...(await center(1)), { steps: 4 });
+  await page.mouse.move(5, 5, { steps: 4 }); // off the board
+  await page.mouse.up();
+  for (const i of [20, 21]) await page.mouse.move(...(await center(i)), { steps: 4 }); // just hovering
+  await expect(page.locator('#board [data-index="1"]')).toHaveText("✕");
+  await expect(page.locator('#board [data-index="20"]')).toHaveText("");
+  await expect(page.locator('#board [data-index="21"]')).toHaveText("");
+});
+
+test("a hint message goes away on Restart and New puzzle", async ({ page }) => {
+  await h.openApp(page);
+  await h.play(page, "queens", "easy");
+  await page.locator("#hint-btn").click();
+  await expect(page.locator("#toast")).toHaveClass(/is-visible/);
+  await page.locator("#restart-btn").click();
+  await expect(page.locator("#toast")).not.toHaveClass(/is-visible/);
+  await page.locator("#hint-btn").click();
+  await page.locator("#new-btn").click();
+  await expect(page.locator("#toast")).not.toHaveClass(/is-visible/);
+});
+
+test("the clock stays stopped while a puzzle's first-time rules are open, even after switching apps", async ({ page }) => {
+  await h.openApp(page, { help: true });
+  await h.play(page, "lights-out", "easy");
+  await expect(page.locator("#help-overlay")).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(5_000);
+  await expect(page.locator("#game-time")).toHaveText("0:00");
+});
+
 test("Queens settings: auto-✕ and region letters", async ({ page }) => {
   await h.openApp(page);
   await openSettings(page);
